@@ -1,0 +1,37 @@
+## pass -DBART_EXACT to get same results as BART, including excess random calls
+BART_EXACT=-DBART_EXACT
+
+INST_DIR=../inst
+
+PKG_CPPFLAGS=-I$(INST_DIR)/include -Iinclude -pthread
+PKG_CPPXXFLAGS=-I$(INST_DIR)/include -Iinclude -pthread
+PKG_LIBS=$(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS) dbarts/libdbarts.a external/libexternal.a -lpthread 
+
+.PHONY: all dbarts/libdbarts.a external/libexternal.a clean
+
+all: $(SHLIB)
+
+$(SHLIB): dbarts/libdbarts.a external/libexternal.a
+
+dbarts/libdbarts.a:
+	@(cd dbarts && $(MAKE) libdbarts.a \
+	  CXX="$(CXX)" R_XTRA_CPPFLAGS="$(R_XTRA_CPPFLAGS)" \
+	  CPPFLAGS="-pthread $(CPPFLAGS) $(BART_EXACT)" \
+	  CXXFLAGS="$(R_XTRA_CXXFLAGS) $(CXXPICFLAGS) $(CXXFLAGS)" \
+	  AR="$(AR)" ARFLAGS="$(ARFLAGS)" RANLIB="$(RANLIB)" \
+	  INST_DIR="$(INST_DIR)")
+
+
+external/libexternal.a :
+	@(cd external && $(MAKE) libexternal.a \
+	  CC="$(CC)" R_XTRA_CPPFLAGS="$(R_XTRA_CPPFLAGS)" \
+	  CPPFLAGS="-pthread $(CPPFLAGS)" \
+	  CFLAGS="$(R_XTRA_CFLAGS) $(CPICFLAGS) $(CFLAGS)" \
+	  AR="$(AR)" ARFLAGS="$(ARFLAGS)" RANLIB="$(RANLIB)" \
+	  INST_DIR="$(INST_DIR)")
+
+
+clean :
+	@(cd dbarts && $(MAKE) clean)
+	@(cd external && $(MAKE) clean)
+	rm -f *.so *.dll *.o

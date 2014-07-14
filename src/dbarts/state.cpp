@@ -49,14 +49,14 @@ namespace {
     void writeInt(int32_t i) {
       char intBuffer[INT_BUFFER_SIZE];
       int bytesWritten = snprintf(intBuffer, INT_BUFFER_SIZE, "%d", i);
-      writeString(intBuffer, bytesWritten);
+      writeString(intBuffer, (size_t) bytesWritten);
     }
     
-    void writeUInt(uint32_t u) {
+    /* void writeUInt(uint32_t u) {
       char intBuffer[INT_BUFFER_SIZE];
       int bytesWritten = snprintf(intBuffer, INT_BUFFER_SIZE, "%u", u);
-      writeString(intBuffer, bytesWritten);
-    }
+      writeString(intBuffer, (size_t) bytesWritten);
+    } */
     
     void writeNode(const Node& node) {
       if (node.isBottom()) {
@@ -105,7 +105,7 @@ namespace {
     
     
     errno = 0;
-    node.p.rule.variableIndex = strtol(buffer, NULL, 10);
+    node.p.rule.variableIndex = (int32_t) strtol(buffer, NULL, 10);
     if (node.p.rule.variableIndex == 0 && errno != 0)
       ext_throwError("Unable to parse tree string: %s", strerror(errno));
     
@@ -119,7 +119,7 @@ namespace {
     ++pos;
     
     errno = 0;
-    node.p.rule.splitIndex = strtol(buffer, NULL, 10);
+    node.p.rule.splitIndex = (int32_t) strtol(buffer, NULL, 10);
     if (node.p.rule.splitIndex == 0 && errno != 0)
       ext_throwError("Unable to parse tree string: %s", strerror(errno));
     

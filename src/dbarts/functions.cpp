@@ -4,7 +4,7 @@
 #include <vector>
 
 #include <external/io.h>
-#include <external/stats.h>
+#include <external/random.h>
 
 #include <dbarts/bartFit.hpp>
 #include <dbarts/model.hpp>
@@ -104,7 +104,7 @@ namespace dbarts {
     
     
     
-    double u = ext_simulateContinuousUniform();
+    double u = ext_rng_simulateContinuousUniform(fit.control.rng);
     // ext_printf("type: %s; ", u < fit.model.birthOrDeathProbability ? "birth/death" : (u < fit.model.birthOrDeathProbability + fit.model.swapProbability ? "swap" : "change"));
     if (u < fit.model.birthOrDeathProbability) {
       alpha = birthOrDeathNode(fit, tree, y, stepTaken, &birthedTree);
@@ -176,7 +176,7 @@ namespace dbarts {
     
     for (uint32_t j = 0; j < numValues; ++j) {
       if (values[j] == true) {
-        if (positiveValueCount == i) return (int32_t) j;
+        if (positiveValueCount == i) return static_cast<int32_t>(j);
         ++positiveValueCount;
       }
     }
@@ -202,7 +202,7 @@ namespace dbarts {
     bool rightFound = false;
     
     *leftIndex = 0; // left value if you top out
-    *rightIndex = fit.scratch.numCutsPerVariable[variableIndex] - 1; // right value if you top out
+    *rightIndex = static_cast<int32_t>(fit.scratch.numCutsPerVariable[variableIndex]) - 1; // right value if you top out
     
     bool isRightChild;
     

@@ -11,12 +11,12 @@ AC_CONFIG_HEADER([src/external/config.h])
 
 m4_include([tools/m4/m4_ax_pthread.m4])
 
-AC_ARG_ENABLE([bart-exact],
-              [AS_HELP_STRING([--disable-bart-exact],
-                              [add/remove unnecessary calls to RNG to get results identical to BayesTree])],
-              [unset bart_exact],
-              [bart_exact=-DBART_EXACT])
-AC_SUBST(bart_exact)
+AC_ARG_ENABLE([match-bayes-tree],
+              [AS_HELP_STRING([--enable-match-bayes-tree],
+                              [get results identical to BayesTree])],
+              [match_bayes_tree=-DMATCH_BAYES_TREE],
+              [unset match_bayes_tree])
+AC_SUBST(match_bayes_tree)
 
 AC_ARG_ENABLE([thread-safe-unload],
               [AS_HELP_STRING([--enable-thread-safe-unload],
@@ -51,6 +51,8 @@ AC_LANG_PUSH(C++)
 AC_C_RESTRICT
 AC_LANG_POP(C++)
 
+AC_C_BIGENDIAN
+
 # Checks for libraries.
 AX_PTHREAD
 AC_SUBST(PTHREAD_CFLAGS)
@@ -68,6 +70,7 @@ then
 fi
 
 AC_CHECK_HEADERS([sys/time.h])
+AC_CHECK_HEADERS([unistd.h])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_INT64_T
@@ -75,6 +78,7 @@ AC_TYPE_UINT64_T
 
 # Checks for library functions.
 AC_CHECK_FUNCS([gettimeofday])
+AC_CHECK_FUNCS([clock_gettime])
 AC_FUNC_ALLOCA
 
 AC_LANG_PUSH(C++)

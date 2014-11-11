@@ -43,16 +43,43 @@ extern "C" {
     fit->setOffset(newOffset);
   }
   
-  void dbarts_setPredictor(BARTFit* fit, const double* newPredictor, size_t predictorColumn) {
-    fit->setPredictor(newPredictor, predictorColumn);
+  
+  int dbarts_setPredictor(BARTFit* fit, const double* newPredictor) {
+    return fit->setPredictor(newPredictor);
   }
   
-  void dbarts_setTestPredictor(BARTFit* fit, const double* newPredictor, size_t predictorColumn) {
-    fit->setTestPredictor(newPredictor, predictorColumn);
+  int dbarts_updatePredictor(BARTFit* fit, const double* newPredictor, size_t column) {
+    return fit->updatePredictor(newPredictor, column);
   }
   
-  void dbarts_setTestPredictors(BARTFit* fit, const double* newPredictor, size_t numTestObservations) {
-    fit->setTestPredictors(newPredictor, numTestObservations);
+  int dbarts_updatePredictors(BARTFit* fit, const double* newPredictor, const size_t* columns, size_t numColumns)
+  {
+    return fit->updatePredictors(newPredictor, columns, numColumns);
+  }
+  
+  void dbarts_setTestPredictor(BARTFit* fit, const double* newTestPredictor, size_t numTestObservations)
+  {
+    fit->setTestPredictor(newTestPredictor, numTestObservations);
+  }
+  
+  void dbarts_setTestOffset(BARTFit* fit, const double* newTestOffset)
+  {
+    fit->setTestOffset(newTestOffset);
+  }
+  
+  void dbarts_setTestPredictorAndOffset(BARTFit* fit, const double* newTestPredictor, const double* newTestOffset, size_t numTestObservations)
+  {
+    fit->setTestPredictorAndOffset(newTestPredictor, newTestOffset, numTestObservations);
+  }
+  
+  void dbarts_updateTestPredictor(dbarts::BARTFit* fit, const double* newTestPredictor, size_t column)
+  {
+    fit->updateTestPredictor(newTestPredictor, column);
+  }
+  
+  void dbarts_updateTestPredictors(dbarts::BARTFit* fit, const double* newTestPredictor, const size_t* columns, size_t numColumns)
+  {
+    fit->updateTestPredictors(newTestPredictor, columns, numColumns);
   }
   
   CGMPrior* dbarts_createCGMPrior() {

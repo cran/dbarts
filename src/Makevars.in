@@ -1,12 +1,12 @@
-## pass -DBART_EXACT to get same results as BART, including excess random calls
-BART_EXACT=@bart_exact@
+## pass -DMATCH_BAYES_TREE to get same results as BayesTree, including excess random calls
+MATCH_BAYES_TREE=@match_bayes_tree@
 THREAD_SAFE_UNLOAD=@thread_safe_unload@
 
 INST_DIR=../inst
 
 PKG_CPPFLAGS=-I$(INST_DIR)/include -Iinclude @PTHREAD_CFLAGS@ $(THREAD_SAFE_UNLOAD)
 PKG_CPPXXFLAGS=-I$(INST_DIR)/include -Iinclude @PTHREAD_CFLAGS@ $(THREAD_SAFE_UNLOAD)
-PKG_LIBS=$(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS) dbarts/libdbarts.a external/libexternal.a @PTHREAD_LIBS@ 
+PKG_LIBS=dbarts/libdbarts.a external/libexternal.a $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS) @PTHREAD_LIBS@ 
 
 .PHONY: all dbarts/libdbarts.a external/libexternal.a clean
 
@@ -17,7 +17,7 @@ $(SHLIB): dbarts/libdbarts.a external/libexternal.a
 dbarts/libdbarts.a:
 	@(cd dbarts && $(MAKE) libdbarts.a \
 	  CXX="$(CXX)" R_XTRA_CPPFLAGS="$(R_XTRA_CPPFLAGS)" \
-	  CPPFLAGS="@PTHREAD_CFLAGS@ $(CPPFLAGS) $(BART_EXACT)" \
+	  CPPFLAGS="@PTHREAD_CFLAGS@ $(CPPFLAGS) $(MATCH_BAYES_TREE)" \
 	  CXXFLAGS="$(R_XTRA_CXXFLAGS) $(CXXPICFLAGS) $(CXXFLAGS)" \
 	  AR="$(AR)" ARFLAGS="$(ARFLAGS)" RANLIB="$(RANLIB)" \
 	  INST_DIR="$(INST_DIR)")
@@ -36,3 +36,16 @@ clean :
 	@(cd dbarts && $(MAKE) clean)
 	@(cd external && $(MAKE) clean)
 	rm -f *.so *.dll *.o
+
+momentsTest : external/pthread.c
+	$(eval CC := $(shell R CMD config CC))
+	$(eval CPPFLAGS := $(shell R CMD config CPPFLAGS))
+	$(eval CFLAGS := $(shell R CMD config CFLAGS))
+	$(eval R_XTRA_CPPFLAGS := $(shell R CMD config --cppflags))
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(R_XTRA_CPPFLAGS) @PTHREAD_CFLAGS@ \
+	  -Iinclude -DMOMENTS_TEST -c external/moments.c -o momentsTest.o
+
+	$(eval LDFLAGS := $(shell R CMD config LDFLAGS))
+	$(eval R_XTRA_LDFLAGS := $(shell R CMD config --ldflags))
+
+	$(CC) $(LDFLAGS) $(R_XTRA_LDFLAGS) @PTHREAD_LIBS@ momentsTest.o external/thread.o -o momentsTest

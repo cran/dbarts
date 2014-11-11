@@ -71,7 +71,7 @@ validateArgumentsInEnvironment <- function(envir, control, verbose, n.samples, s
   }
 }
 
-dbarts <- function(formula, data, test, subset, weights, offset,
+dbarts <- function(formula, data, test, subset, weights, offset, offset.test = offset,
                    verbose = FALSE, n.samples = 1000L,
                    tree.prior = cgm, node.prior = normal, resid.prior = chisq,
                    control = dbartsControl(), sigma = NA_real_)
@@ -85,7 +85,7 @@ dbarts <- function(formula, data, test, subset, weights, offset,
   if (control@call[[1]] != call("NA")[[1]]) control@call <- matchedCall
   control@verbose <- verbose
 
-  parseDataCall <- prepareCallWithArguments(matchedCall, quoteInNamespace(parseData), "formula", "data", "test", "subset", "weights", "offset")
+  parseDataCall <- prepareCallWithArguments(matchedCall, quoteInNamespace(parseData), "formula", "data", "test", "subset", "weights", "offset", "offset.test")
   modelMatrices <- eval(parseDataCall, parent.frame(1L))
   
   data <- new("dbartsData", modelMatrices, attr(control, "n.cuts"), sigma)
@@ -95,8 +95,12 @@ dbarts <- function(formula, data, test, subset, weights, offset,
 
   uniqueResponses <- unique(data@y)
   if (length(uniqueResponses) == 2 && all(sort(uniqueResponses) == c(0, 1))) control@binary <- TRUE
-  if (!control@binary && !is.null(data@offset) && length(unique(data@offset)) == 1) {
+  ## bart will passthrough with offset == something no matter what, which we can NULL out
+  if (!control@binary && !is.null(data@offset) && all(data@offset == 0.0)) {
     data@offset <- NULL
+  }
+  if (!control@binary && !is.null(data@offset.test) && all(data@offset.test == 0.0)) {
+    data@offset.test <- NULL
   }
 
   parsePriorsCall <- prepareCallWithArguments(matchedCall, quoteInNamespace(parsePriors), "tree.prior", "node.prior", "resid.prior")
@@ -126,6 +130,7 @@ dbartsSampler <-
                 initialize =
                   function(control, model, data, ...)
                 {
+                  ## cat("given x: "); .Call("dbarts_printAddress", data@x); cat("\n")
                   if (!inherits(control, "dbartsControl")) stop("'control' must inherit from dbartsControl")
                   if (!inherits(model, "dbartsModel")) stop("'model' must inherit from dbartsModel")
                   if (!inherits(data, "dbartsData")) stop("'data' must inherit from dbartsData")
@@ -135,7 +140,15 @@ dbartsSampler <-
                   data    <<- data
                   state   <<- NULL
                   pointer <<- .Call("dbarts_create", control, model, data)
+                  ## selfEnv <- as.environment(.self)
+                  ## selfEnv$control <- control
+                  ## selfEnv$model <- model
+                  ## selfEnv$data <- data
+                  ## selfEnv$state <- NULL
+                  ## pointer <<- .Call("dbarts_create", selfEnv$control, selfEnv$model, selfEnv$data)
 
+                  ## cat("set x: "); .Call("dbarts_printAddress", selfEnv$data@x); cat("\n")
+                  
                   callSuper(...)
                 },
                 run = function(numBurnIn, numSamples, updateState = NA) {
@@ -154,25 +167,34 @@ dbartsSampler <-
                 },
                 copy = function(shallow = FALSE)
                 {
-                  newData <- data
-                  if (!shallow) {
-                    newData@x <- newData@x + 0
-                    if (!is.null(data@x.test)) newData@x.test <- newData@x.test + 0
-                  }
-                  dupe <- dbartsSampler$new(control, model, newData)
+                  dupe <-
+                    if (shallow) {
+                      dbartsSampler$new(control, model, data)
+                    } else {
+                      newData <- data
+                      ## only need to dupe things that can be changed internally, as the rest will be
+                      ## simply swapped out
+                      newData@x <- .Call("dbarts_deepCopy", data@x)
+                      if (!is.null(data@x.test)) {
+                        newData@x.test <- .Call("dbarts_deepCopy", data@x.test)
+                      }
+                      dupe <- dbartsSampler$new(control, model, newData)
+                    }
 
                   if (!is.null(state)) {
                     newState <- state
-                    newState@fit.tree <- newState@fit.tree + 0
-                    newState@fit.total <- newState@fit.total + 0
-                    if (!is.null(data@x.test)) newState@fit.test <- newState@fit.test + 0
-                    newState@sigma <- newState@sigma + 0
-                    newState@runningTime <- newState@runningTime + 0
-                    newState@trees <- paste0(newState@trees, "")
+                    newState@fit.tree <- .Call("dbarts_deepCopy", state@fit.tree)
+                    newState@fit.total <- .Call("dbarts_deepCopy", state@fit.total)
+                    if (!is.null(data@x.test)) {
+                      newState@fit.test <- .Call("dbarts_deepCopy", state@fit.test)
+                    }
+                    newState@sigma <- .Call("dbarts_deepCopy", state@sigma)
+                    newState@runningTime <- .Call("dbarts_deepCopy", state@runningTime)
+                    newState@trees <- .Call("dbarts_deepCopy", state@trees)
 
                     dupe$setState(newState)
                   }
-
+                  
                   dupe
                 },    
                 show = function() {
@@ -221,6 +243,7 @@ dbartsSampler <-
                 setResponse = function(y, updateState = NA) {
                   'Changes the response against which the sampler is fitted.'
                   ptr <- getPointer()
+                  
                   data@y <<- as.double(y)
                   .Call("dbarts_setResponse", ptr, data@y)
 
@@ -232,8 +255,41 @@ dbartsSampler <-
                 setOffset = function(offset, updateState = NA) {
                   'Changes the offset slot used to adjust the response.'
                   ptr <- getPointer()
-                  data@offset <<- as.double(offset)
+
+                  offset.test <- NA
+                  if (is.null(offset)) {
+                    if (identical(data@testUsesRegularOffset, TRUE)) offset.test <- NULL
+                  } else {
+                    offset <- as.double(offset)
+
+                    if (length(offset) == 1) {
+                      if (identical(data@testUsesRegularOffset, TRUE)) {
+                        if (!is.null(data@x.test)) {
+                          offset.test <- rep_len(offset, nrow(data@x.test))
+                        } else {
+                          offset.test <- NULL
+                        }
+                      }
+                      offset <- rep_len(offset, length(data@y))
+                    } else {
+                      if (!identical(length(offset), length(data@y)))
+                        stop('length of replacement offset is not equal to number of observations')
+                      if (identical(data@testUsesRegularOffset, TRUE)) {
+                        if (!is.null(data@x.test) && length(offset) == nrow(data@x.test)) {
+                          offset.test <- offset
+                        } else {
+                          offset.test <- NULL
+                        }
+                      }
+                    }
+                  }
+
+                  data@offset <<- offset
                   .Call("dbarts_setOffset", ptr, data@offset)
+                  if (!identical(offset.test, NA)) {
+                    data@offset.test <<- offset.test
+                    .Call("dbarts_setTestOffset", ptr, data@offset.test)
+                  }
 
                   if ((is.na(updateState) && control@updateState == TRUE) || identical(updateState, TRUE))
                     storeState(ptr)
@@ -241,42 +297,108 @@ dbartsSampler <-
                   invisible(NULL)
                 },
                 setPredictor = function(x, column, updateState = NA) {
-                  'Changes a single column of the predictor matrix.'
-                  if (is.character(column)) {
+                  'Changes a single column of the predictor matrix, or the entire matrix itself if the column argument is missing. TRUE/FALSE returned as to whether or not the operation was successful.'
+
+                  columnIsMissing <- missing(column)
+
+                  if (!columnIsMissing && is.character(column)) {
                     if (is.null(colnames(data@x))) stop("column names not specified at initialization, so cannot be replaced by name")
                     
                     column <- match(column, colnames(data@x))
                     if (is.na(column)) stop("column name not found in names of current X")
                   }
-
+                  
+                  x <- if (is.matrix(x)) matrix(as.double(x), nrow(x)) else as.double(x)
+                  
                   ptr <- getPointer()
-                  .Call("dbarts_setPredictor", ptr, as.double(x), as.integer(column))
+                  updateSuccessful <-
+                    if (columnIsMissing) {
+                      data@x <<- x
+                      .Call("dbarts_setPredictor", ptr, x)
+                    } else {
+                      .Call("dbarts_updatePredictor", ptr, x, as.integer(column))
+                    }
+                  
+                  if ((is.na(updateState) && control@updateState == TRUE) || identical(updateState, TRUE))
+                    storeState(ptr)
 
+                  return(updateSuccessful)
+                },
+                setTestPredictor = function(x.test, column, updateState = NA) {
+                  'Changes a single column of the test predictor matrix.'
+
+                  columnIsMissing <- missing(column)
+                  
+                  if (!columnIsMissing && is.character(column)) {
+                    if (is.null(colnames(data@x.test))) stop("column names not specified at initialization, so cannot be replaced by name")
+                    
+                    column <- match(column, colnames(data@x.test))
+                    if (is.na(column)) stop("column name not found in names of current test predictor matrix")
+                  }
+                  
+                  ptr <- getPointer()
+                  if (columnIsMissing) {
+                    data@x.test <<- validateXTest(x.test, ncol(data@x), colnames(data@x))
+                    .Call("dbarts_setTestPredictor", ptr, data@x.test)
+                  } else {
+                    x.test <- if (is.matrix(x.test)) matrix(as.double(x.test), nrow(x.test)) else as.double(x.test)
+                    .Call("dbarts_updateTestPredictor", ptr, x.test, as.integer(column))
+                  }
+                  
                   if ((is.na(updateState) && control@updateState == TRUE) || identical(updateState, TRUE))
                     storeState(ptr)
 
                   invisible(NULL)
                 },
-                setTestPredictor = function(x.test, column, updateState = NA) {
-                  'changes either a single column or the entire test predictor matrix'
+                setTestPredictorAndOffset = function(x.test, offset.test, updateState = NA) {
+                   'Changes the test predictor matrix, and optionally the test offset.'
+                   ptr <- getPointer()
+
+                   x.test <- validateXTest(x.test, ncol(data@x), colnames(data@x))
+
+                   if (!missing(offset.test)) {
+                     if (is.null(x.test)) {
+                       if (!is.null(offset.test)) stop("when test matrix is NULL, test offset must be as well")
+                     } else {
+                       if (!is.null(offset.test)) {
+                         offset.test <- as.double(offset.test)
+                         if (length(offset.test) == 1) {
+                           offset.test <- rep_len(offset, nrow(x.test))
+                         }
+                         if (!identical(length(offset.test), nrow(x.test))) {
+                           stop("length of test offset must be equal to number of rows in test matrix")
+                         }
+                       }
+                     }
+                     data@testUsesRegularOffset <<- FALSE
+
+                     data@x.test <<- x.test
+                     data@offset.test <<- offset.test
+                     .Call("dbarts_setTestPredictorAndOffset", ptr, data@x.test, data@offset.test)
+                   } else {
+                     data@x.test <<- x.test
+                     .Call("dbarts_setTestPredictorAndOffset", ptr, data@x.test, NA_real_)
+                   }
+
+                   if ((is.na(updateState) && control@updateState == TRUE) || identical(updateState, TRUE))
+                     storeState(ptr)
+
+                   invisible(NULL)
+                },
+                setTestOffset = function(offset.test, updateState = NA) {
+                  'Changes the test offset.'
                   ptr <- getPointer()
-                  
-                  if (missing(column)) {
-                    x.test <- validateXTest(x.test, ncol(data@x), colnames(data@x))
 
-                    data@x.test <<- x.test
-                    .Call("dbarts_setTestPredictors", ptr, data@x.test)
-                  } else {
-                    if (is.character(column)) {
-                      if (is.null(colnames(data@x.test))) stop("column names not specified at initialization, so cannot be replaced by name")
-                      
-                      column <- match(column, colnames(data@x.test))
-                      if (is.na(column)) stop("column name not found in names of current test predictor matrix")
-                    }
-                    
-                    .Call("dbarts_setTestPredictor", ptr, as.double(x.test), as.integer(column))
+                  data@testUsesRegularOffset <<- FALSE
+                  if (!is.null(offset.test)) {
+                    if (is.null(data@x.test)) stop("when test matrix is NULL, test offset must be as well")
+                    if (length(offset.test) == 1) offset.test <- rep_len(offset.test, nrow(data@x.test))
+                    if (length(offset.test) != nrow(data@x.test))
+                      stop("length of test offset must be equal to number of rows in test matrix")
                   }
-
+                  data@offset.test <<- offset.test
+                  .Call("dbarts_setTestOffset", ptr, data@offset.test)
+                  
                   if ((is.na(updateState) && control@updateState == TRUE) || identical(updateState, TRUE))
                     storeState(ptr)
 

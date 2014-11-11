@@ -7,6 +7,8 @@
 
 #include <dbarts/types.hpp>
 
+struct ext_rng;
+
 namespace dbarts {
   using std::size_t;
   using std::uint32_t;
@@ -22,9 +24,6 @@ namespace dbarts {
       int32_t splitIndex;
       uint32_t categoryDirections;
     };
-    
-    // Rule();
-    // Rule(const Rule& other); // copy constructor; duplicates
     
     void invalidate();
     
@@ -68,7 +67,7 @@ namespace dbarts {
       EndNodeMembers m;
     };
     
-#define BART_INVALID_NODE_ENUM ((size_t) -1)
+#define BART_INVALID_NODE_ENUM static_cast<size_t>(-1)
     size_t enumerationIndex;
     bool* variablesAvailableForSplit;
     
@@ -121,7 +120,7 @@ namespace dbarts {
     void clearObservations();
     void clear();
     
-    double drawFromPosterior(const EndNodePrior& endNodePrior, double residualVariance) const;
+    double drawFromPosterior(ext_rng* rng, const EndNodePrior& endNodePrior, double residualVariance) const;
     void setPredictions(double* y_hat, double prediction) const;
         
     size_t getDepth() const;
@@ -163,7 +162,14 @@ namespace dbarts {
 
   inline size_t Node::getNumObservations() const { return numObservations; }
   inline double Node::getAverage() const { return m.average; }
+
+#ifdef MATCH_BAYES_TREE
+  // This only means something if weights are supplied, which BayesTree didn't have.
+  // It is also only meaningful on non-end nodes when using MATCH_BAYES_TREE.
+  inline double Node::getNumEffectiveObservations() const { if (leftChild == NULL) return m.numEffectiveObservations; else return leftChild->getNumEffectiveObservations() + p.rightChild->getNumEffectiveObservations(); }
+#else
   inline double Node::getNumEffectiveObservations() const { return m.numEffectiveObservations; }
+#endif
   inline void Node::setAverage(double newAverage) { leftChild = NULL; m.average = newAverage; }
   inline void Node::setNumEffectiveObservations(double n) { leftChild = NULL; m.numEffectiveObservations = n; }
   

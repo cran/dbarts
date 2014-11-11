@@ -5,10 +5,14 @@ if [ -f src/Makevars ]; then
 else
   (cd src; make -f Makevars.in clean)
 fi
+rm -rf a.out.dSYM
 rm -rf autom4te.cache
+rm -rf a.out.dSYM
 rm -f config.log
 rm -f config.status
 rm -f src/config.hpp
 rm -f src/dbarts/config.hpp
 rm -f src/external/config.h
 rm -f src/Makevars
+
+rm -f src/momentsTest*

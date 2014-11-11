@@ -11,6 +11,9 @@ setMethod("initialize", "dbartsData",
     .Object@x.test <- modelMatrices$x.test
     .Object@weights <- modelMatrices$weights
     .Object@offset <- modelMatrices$offset
+    .Object@offset.test <- modelMatrices$offset.test
+
+    .Object@testUsesRegularOffset <- modelMatrices$testUsesRegularOffset
   }
   
   .Object@n.cuts <- rep_len(as.integer(n.cuts), ncol(.Object@x))
@@ -58,19 +61,41 @@ validateXTest <- function(x.test, numPredictors, predictorNames)
   x.test
 }
 
-parseData <- function(formula, data, test, subset, weights, offset)
+parseData <- function(formula, data, test, subset, weights, offset, offset.test = offset)
 {
   dataIsMissing <- missing(data)
   testIsMissing <- missing(test)
+  offsetIsMissing <- missing(offset)
   matchedCall <- match.call()
-  
+
+  offsetGivenAsScalar <- NA
+  testUsesRegularOffset <- NA
+
   ## default case of fn(y ~ x, data, ...)
   if (is.language(formula) && formula[[1]] == '~') {
 
+    ## remove "test" and offset.test before calling model.frame
+    modelFrameArgs <- c("formula", "data", "subset", "weights", "offset")
+
+    ## pull out offset if it is a scalar, else model.frame will bug out
+    if (!dataIsMissing && !is.data.frame(data) && !offsetIsMissing) {
+      temp <- NULL
+      tryResult <-
+        tryCatch(temp <- eval(call("$", as.symbol("data"), matchedCall$offset)), error = function(e) e)
+      if (is(tryResult, "error") || is.null(temp)) {
+        temp <- eval(matchedCall$offset, environment(formula))
+      }
+      if (!is.null(temp) && length(temp) == 1) {
+        offset <- temp
+        if (!is.numeric(offset)) stop("'offset' must be numeric")
+        offsetGivenAsScalar <- TRUE
+        modelFrameArgs <- c("formula", "data", "subset", "weights")
+      }
+    }
+
     modelFrameCall <- matchedCall
 
-    ## remove "test"
-    matchPositions <- match(c("formula", "data", "subset", "weights", "offset"),
+    matchPositions <- match(modelFrameArgs,
                             names(modelFrameCall), nomatch = 0L)
     
     modelFrameCall <- modelFrameCall[c(1L, matchPositions)]
@@ -88,9 +113,16 @@ parseData <- function(formula, data, test, subset, weights, offset)
       if (!is.numeric(weights)) stop("'weights' must be numeric vector")
       weights <- rep_len(weights, numObservations)
     }
-    
-    offset <- as.vector(model.offset(modelFrame))
-    if (!is.null(offset) && length(offset) != numObservations) stop("length of offset must be equal to that of y")
+
+    if (!identical(offsetGivenAsScalar, TRUE)) {
+      offset <- as.vector(model.offset(modelFrame))
+      if (!is.null(offset)) {
+        if (length(offset) != numObservations) stop("length of offset must be equal to that of y")
+        offsetGivenAsScalar <- FALSE
+      }
+    } else {
+      offset <- rep_len(offset, numObservations)
+    }
 
     modelTerms <- terms(modelFrame)
     if (is.empty.model(modelTerms)) stop("covariates must be specified for regression tree analysis")
@@ -103,11 +135,12 @@ parseData <- function(formula, data, test, subset, weights, offset)
       if (numFactorTerms == 0) NULL else lapply(modelFrame[,termIsFactor], contrasts, contrasts = FALSE)
     
     x <- model.matrix(modelTerms, modelFrame, contrasts)
+    
 
-    ## unless the test data has the same number of rows as the 
+    
     if (!testIsMissing) {
       foundTest <- FALSE
-      if (!dataIsMissing && is.list(data)) {
+      if (!dataIsMissing && !is.data.frame(data)) {
         tryResult <-
           tryCatch(temp <- eval(call("$", as.symbol("data"), matchedCall$test)), error = function(e) e)
         
@@ -147,10 +180,15 @@ parseData <- function(formula, data, test, subset, weights, offset)
       weights <- rep_len(weights, initialNumObservations)[subset]
     }
 
-    if (missing(offset)) offset <- NULL
+    if (offsetIsMissing) offset <- NULL
     if (!is.null(offset)) {
-      if (!is.numeric(offset)) stop("'offset' must be a numeric vector")
-      if (length(offset) == 1) offset <- rep_len(offset, initialNumObservations)
+      if (!is.numeric(offset)) stop("'offset' must be numeric")
+      if (length(offset) == 1) {
+        offset <- rep_len(offset, initialNumObservations)
+        offsetGivenAsScalar <- TRUE
+      } else {
+        offsetGivenAsScalar <- FALSE
+      }
       if (length(offset) != initialNumObservations) stop("length of 'offset' must equal length of 'y'")
       offset <- offset[subset]
     }
@@ -161,10 +199,59 @@ parseData <- function(formula, data, test, subset, weights, offset)
   if (is.vector(x)) x <- as.matrix(x)
   if (is.data.frame(x)) x <- makeModelMatrixFromDataFrame(x)
 
-  
+
   x.test <- NULL
   if (!testIsMissing && !is.null(test) && NCOL(test) > 0)
     x.test <- validateXTest(test, ncol(x), colnames(x))
+
+  if (!is.null(x.test)) {
+    if (missing(offset.test)) {
+      ## default is offset.test = offset
+      if (identical(offsetGivenAsScalar, TRUE)) {
+        offset.test <- rep_len(offset[1], nrow(x.test))
+      } else if (identical(offsetGivenAsScalar, FALSE)) {
+        if (nrow(x.test) != length(y)) stop("vectored 'offset' cannot be directly applied to test data of unequal length")
+        offset.test <- offset
+      }
+      
+      if (!is.na(offsetGivenAsScalar)) testUsesRegularOffset <- TRUE
+    } else if (!is.null(matchedCall$offset.test)) {
+      ## test.offset could have been something like (offset + 0.5), and we would just have redefined offset
+      if (is.language(matchedCall$offset.test)) {
+
+
+        ## we can also have wierdness such as (offset + variable), where offset is now in our
+        ## our environment but the variable is in the caller
+        testReferencesOffset <- any(as.list(matchedCall$offset.test) == "offset")
+        
+        evalEnv <- if (testReferencesOffset) {
+          result <- new.env(parent = parent.frame())
+          result$offset <- if (offsetGivenAsScalar == TRUE) offset[1] else offset
+          result
+        } else {
+          parent.frame()
+        }
+        
+        offset.test <- eval(matchedCall$offset.test, evalEnv)
+      }
+        
+      if (length(offset.test) == 1) {
+        offset.test <- rep_len(offset.test, nrow(x.test))
+      }
+      
+      testUsesRegularOffset <- FALSE
+
+      ## for when, for whatever reason, it is manually passed in "offset.test = offset"
+      if (identical(matchedCall$offset.test, quote(offset))) {
+        testUsesRegularOffset <- TRUE
+      }
+    } else {
+      testUsesRegularOffset <- FALSE
+    }
+  } else {
+    if (missing(offset.test)) offset.test <- NULL
+  }
   
-  list(y = y, x = x, x.test = x.test, weights = weights, offset = offset)
+  list(y = y, x = x, x.test = x.test, weights = weights, offset = offset, offset.test = offset.test,
+       testUsesRegularOffset = testUsesRegularOffset)
 }

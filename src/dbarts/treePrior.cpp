@@ -33,13 +33,13 @@ namespace dbarts {
   {
     if (node.getNumVariablesAvailableForSplit(fit.data.numPredictors) == 0) return 0.0;
 
-#ifdef BART_EXACT
+#ifdef MATCH_BAYES_TREE
     if (node.getNumEffectiveObservations() < 5.0) {
       return 0.001 * base / std::pow(1.0 + node.getDepth(), power);
 		}
 #endif
     
-    return base / std::pow(1.0 + (double) node.getDepth(), power);
+    return base / std::pow(1.0 + static_cast<double>(node.getDepth()), power);
   }
   
   double CGMPrior::computeTreeLogProbability(const BARTFit& fit, const Tree& tree) const
@@ -49,7 +49,7 @@ namespace dbarts {
   
   double CGMPrior::computeSplitVariableLogProbability(const BARTFit& fit, const Node& node) const
   {
-    return -std::log((double) node.getNumVariablesAvailableForSplit(fit.data.numPredictors));
+    return -std::log(static_cast<double>(node.getNumVariablesAvailableForSplit(fit.data.numPredictors)));
   }
   
   double CGMPrior::computeRuleForVariableLogProbability(const BARTFit& fit, const Node& node) const
@@ -68,14 +68,14 @@ namespace dbarts {
       uint32_t numCategoriesCanReachNode = 0;
       for (size_t i = 0; i < numCategories; ++i) if (categoriesCanReachNode[i]) ++numCategoriesCanReachNode;
       
-      result  = std::log(std::pow(2.0, (double) numCategoriesCanReachNode - 1.0) - 1.0);
-      result -= std::log(std::pow(2.0, (double) (numCategories - numCategoriesCanReachNode)));
+      result  = std::log(std::pow(2.0, static_cast<double>(numCategoriesCanReachNode) - 1.0) - 1.0);
+      result -= std::log(std::pow(2.0, static_cast<double>(numCategories - numCategoriesCanReachNode)));
       
       ext_stackFree(categoriesCanReachNode);
     } else {
       int32_t leftCutIndex, rightCutIndex;
       setSplitInterval(fit, node, variableIndex, &leftCutIndex, &rightCutIndex);
-      result = -std::log((double) (rightCutIndex - leftCutIndex + 1));
+      result = -std::log(static_cast<double>(rightCutIndex - leftCutIndex + 1));
     }
     
     return result;
@@ -91,7 +91,7 @@ namespace dbarts {
   {
     size_t numGoodVariables = node.getNumVariablesAvailableForSplit(fit.data.numPredictors);
     
-    size_t variableNumber = ext_simulateUnsignedIntegerUniformInRange(0, numGoodVariables);
+    size_t variableNumber = ext_rng_simulateUnsignedIntegerUniformInRange(fit.control.rng, 0, numGoodVariables);
     
     return findIndexOfIthPositiveValue(node.variablesAvailableForSplit, fit.data.numPredictors, variableNumber);
   }
@@ -124,8 +124,8 @@ namespace dbarts {
       bool* sendCategoriesRight = ext_stackAllocate(numCategoriesCanReachNode, bool);
       sendCategoriesRight[0] = true; // the first value always goes right so that at least one does
       
-      uint64_t categoryIndex = (uint64_t) ext_simulateIntegerUniformInRange(0, (int64_t) (std::pow(2.0, (double) numCategoriesCanReachNode - 1.0) - 1.0));
-      setBinaryRepresentation(numCategoriesCanReachNode - 1, (uint32_t) categoryIndex, sendCategoriesRight + 1);
+      uint64_t categoryIndex = ext_rng_simulateUnsignedIntegerUniformInRange(fit.control.rng, 0, static_cast<uint64_t>(std::pow(2.0, static_cast<double>(numCategoriesCanReachNode) - 1.0) - 1.0));
+      setBinaryRepresentation(numCategoriesCanReachNode - 1, static_cast<uint32_t>(categoryIndex), sendCategoriesRight + 1);
       
       uint32_t sendIndex = 0;
       for (uint32_t i = 0; i < numCategories; ++i) {
@@ -135,7 +135,7 @@ namespace dbarts {
           else result.setCategoryGoesLeft(i);
         } else {
           // result.categoryDirections[i] = ext_simulateBernoulli(0.5) == 1 ? BART_CAT_RIGHT : BART_CAT_LEFT;
-          if (ext_simulateBernoulli(0.5) == 1) result.setCategoryGoesRight(i);
+          if (ext_rng_simulateBernoulli(fit.control.rng, 0.5) == 1) result.setCategoryGoesRight(i);
           else result.setCategoryGoesLeft(i);
         }
       }
@@ -159,7 +159,7 @@ namespace dbarts {
         ext_printf("error in drawRuleFromPrior: no splits left for ordered var\n");
       }
       
-      result.splitIndex = (int32_t) ext_simulateIntegerUniformInRange(leftIndex, rightIndex + 1);
+      result.splitIndex = static_cast<int32_t>(ext_rng_simulateIntegerUniformInRange(fit.control.rng, leftIndex, rightIndex + 1));
       
       if (result.splitIndex == leftIndex) *exhaustedLeftSplits = true;
       if (result.splitIndex == rightIndex) *exhaustedRightSplits = true;

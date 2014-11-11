@@ -18,10 +18,10 @@ packageBartResults <- function(fit, samples, burnInSigma = NULL)
 
   if (!responseIsBinary) sigma <- samples$sigma
     
-  if (responseIsBinary && !is.null(fit$data@offset)) {
-    if (fit$control@keepTrainingFits) yhat.train <- yhat.train + fit$data@offset
-    if (NROW(fit$data@x.test) > 0)    yhat.test  <- yhat.test  + fit$data@offset
-  }
+  ##if (responseIsBinary && !is.null(fit$data@offset)) {
+  ##  if (fit$control@keepTrainingFits) yhat.train <- yhat.train + fit$data@offset
+  ##  if (NROW(fit$data@x.test) > 0)    yhat.test  <- yhat.test  + fit$data@offset
+  ##}
 
   varcount <- t(samples$varcount)
   
@@ -60,12 +60,12 @@ bart <- function(
    ndpost = 1000L, nskip = 100L,
    printevery = 100L, keepevery = 1L, keeptrainfits = TRUE,
    usequants = FALSE, numcut = 100L, printcutoffs = 0L,
-   verbose = TRUE
+   verbose = TRUE, nthread = 1L
 )
 {
   control <- dbartsControl(keepTrainingFits = as.logical(keeptrainfits), useQuantiles = as.logical(usequants),
                            n.burn = as.integer(nskip), n.trees = as.integer(ntree),
-                           n.thin = as.integer(keepevery),
+                           n.threads = as.integer(nthread), n.thin = as.integer(keepevery),
                            printEvery = as.integer(printevery), printCutoffs = as.integer(printcutoffs))
   control@call <- match.call()
 
@@ -89,17 +89,19 @@ bart <- function(
   burnInSigma <- NULL
   if (nskip > 0L) {
     oldX.test <- sampler$data@x.test
+    oldOffset.test <- sampler$data@offset.test
+    
     oldKeepTrainingFits <- control@keepTrainingFits
     oldVerbose <- control@verbose
-      
-    if (length(x.test) > 0) sampler$setTestPredictor(NULL, updateState = FALSE)
+
+    if (length(x.test) > 0) sampler$setTestPredictorAndOffset(NULL, NULL, updateState = FALSE)
     control@keepTrainingFits <- FALSE
     control@verbose <- FALSE
     sampler$setControl(control)
 
     burnInSigma <- sampler$run(0L, control@n.burn, FALSE)$sigma
     
-    if (length(x.test) > 0) sampler$setTestPredictor(oldX.test, updateState = FALSE)
+    if (length(x.test) > 0) sampler$setTestPredictorAndOffset(oldX.test, oldOffset.test, updateState = FALSE)
     control@keepTrainingFits <- oldKeepTrainingFits
     control@verbose <- oldVerbose
     sampler$setControl(control)

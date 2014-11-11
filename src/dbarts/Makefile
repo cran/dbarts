@@ -4,10 +4,10 @@ HEADERS=-I../$(INST_DIR)/include -I../include
 PKG_CPPFLAGS=$(HEADERS)
 ALL_CPPFLAGS=$(R_XTRA_CPPFLAGS) $(PKG_CPPFLAGS) $(CPPFLAGS)
 
-LOCAL_SOURCES = bartFit.cpp birthDeathRule.cpp changeRule.cpp functions.cpp \
+LOCAL_SOURCES=bartFit.cpp birthDeathRule.cpp changeRule.cpp functions.cpp \
           likelihood.cpp node.cpp parameterPrior.cpp state.cpp \
           swapRule.cpp tree.cpp treePrior.cpp
-LOCAL_OBJECTS = bartFit.o birthDeathRule.o changeRule.o functions.o \
+LOCAL_OBJECTS=bartFit.o birthDeathRule.o changeRule.o functions.o \
           likelihood.o node.o parameterPrior.o state.o \
           swapRule.o tree.o treePrior.o
 

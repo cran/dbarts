@@ -38,7 +38,7 @@ namespace dbarts {
     if (fit.data.variableTypes[variableIndex] == CATEGORICAL) {
       // x is a double, but that is 64 bits wide, and as such we can treat it as
       // a 64 bit integer
-      uint32_t categoryId = (uint32_t) *((const uint64_t*) (x + variableIndex));
+      uint32_t categoryId = static_cast<uint32_t>(*(reinterpret_cast<const uint64_t*>(x + variableIndex)));
       
       return categoryGoesRight(categoryId);
     } else {
@@ -503,14 +503,14 @@ namespace dbarts {
       if (isTop()) {
         if (fit.data.weights == NULL) {
           m.average = ext_mt_computeMean(fit.threadManager, y, numObservations);
-          m.numEffectiveObservations = (double) numObservations;
+          m.numEffectiveObservations = static_cast<double>(numObservations);
         } else {
           m.average = ext_mt_computeWeightedMean(fit.threadManager, y, numObservations, fit.data.weights, &m.numEffectiveObservations);
         }
       } else {
         if (fit.data.weights == NULL) {
           m.average = ext_mt_computeIndexedMean(fit.threadManager, y, observationIndices, numObservations);
-          m.numEffectiveObservations = (double) numObservations;
+          m.numEffectiveObservations = static_cast<double>(numObservations);
         } else {
           m.average = ext_mt_computeIndexedWeightedMean(fit.threadManager, y, observationIndices, numObservations, fit.data.weights, &m.numEffectiveObservations);
         }
@@ -526,42 +526,45 @@ namespace dbarts {
     ext_mt_getNumThreadsForJob(fit.threadManager, numObservations, MIN_NUM_OBSERVATIONS_IN_NODE_PER_THREAD,
                                &numThreads, &numElementsPerThread); */
     
-    size_t numOnLeft;
-    IndexOrdering ordering(fit, p.rule);
+    size_t numOnLeft = 0;
     
-    //if (numThreads <= 1) {
-      numOnLeft = (isTop() ?
-                   partitionRange(observationIndices, 0, numObservations, ordering) :
-                   partitionIndices(observationIndices, numObservations, ordering));
-    /*} else {
-      PartitionThreadData* threadData = ext_stackAllocate(numThreads, PartitionThreadData);
-      void** threadDataPtrs = ext_stackAllocate(numThreads, void*);
+    if (numObservations > 0) {
+      IndexOrdering ordering(fit, p.rule);
+    
+      //if (numThreads <= 1) {
+        numOnLeft = (isTop() ?
+                     partitionRange(observationIndices, 0, numObservations, ordering) :
+                     partitionIndices(observationIndices, numObservations, ordering));
+      /*} else {
+        PartitionThreadData* threadData = ext_stackAllocate(numThreads, PartitionThreadData);
+        void** threadDataPtrs = ext_stackAllocate(numThreads, void*);
       
-      size_t i;
-      for (i = 0; i < numThreads - 1; ++i) {
+        size_t i;
+        for (i = 0; i < numThreads - 1; ++i) {
+          threadData[i].indices = observationIndices + i * numElementsPerThread;
+          threadData[i].startIndex = isTop() ? i * numElementsPerThread : ((size_t) -1);
+          threadData[i].length = numElementsPerThread;
+          threadData[i].ordering = &ordering;
+          threadDataPtrs[i] = &threadData[i];
+        }
         threadData[i].indices = observationIndices + i * numElementsPerThread;
         threadData[i].startIndex = isTop() ? i * numElementsPerThread : ((size_t) -1);
-        threadData[i].length = numElementsPerThread;
+        threadData[i].length = numObservations - i * numElementsPerThread;
         threadData[i].ordering = &ordering;
         threadDataPtrs[i] = &threadData[i];
-      }
-      threadData[i].indices = observationIndices + i * numElementsPerThread;
-      threadData[i].startIndex = isTop() ? i * numElementsPerThread : ((size_t) -1);
-      threadData[i].length = numObservations - i * numElementsPerThread;
-      threadData[i].ordering = &ordering;
-      threadDataPtrs[i] = &threadData[i];
      
       
       
-      ext_mt_runTasks(fit.threadManager, &partitionTask, threadDataPtrs, numThreads);
+        ext_mt_runTasks(fit.threadManager, &partitionTask, threadDataPtrs, numThreads);
       
       
       
-      numOnLeft = mergePartitions(threadData, numThreads);
+        numOnLeft = mergePartitions(threadData, numThreads);
       
-      ext_stackFree(threadDataPtrs);
-      ext_stackFree(threadData);
-    } */
+        ext_stackFree(threadDataPtrs);
+        ext_stackFree(threadData);
+      } */
+    }
     
     
     leftChild->observationIndices = observationIndices;
@@ -583,19 +586,19 @@ namespace dbarts {
     leftChild->clearObservations();
     p.rightChild->clearObservations();
     
-    size_t numOnLeft;
-    IndexOrdering ordering(fit, p.rule);
+    size_t numOnLeft = 0;
+    if (numObservations > 0) {
+      IndexOrdering ordering(fit, p.rule);
     
-    numOnLeft = (isTop() ?
-                 partitionRange(observationIndices, 0, numObservations, ordering) :
-                 partitionIndices(observationIndices, numObservations, ordering));
-    
+      numOnLeft = (isTop() ?
+                   partitionRange(observationIndices, 0, numObservations, ordering) :
+                   partitionIndices(observationIndices, numObservations, ordering));
+    }
     
     leftChild->observationIndices = observationIndices;
     leftChild->numObservations = numOnLeft;
     p.rightChild->observationIndices = observationIndices + numOnLeft;
     p.rightChild->numObservations = numObservations - numOnLeft;
-    
     
     leftChild->addObservationsToChildren(fit);
     p.rightChild->addObservationsToChildren(fit);
@@ -608,13 +611,13 @@ namespace dbarts {
     if (isTop()) {
       if (fit.data.weights == NULL) {
         m.average = ext_mt_computeMean(fit.threadManager, y, numObservations);
-        m.numEffectiveObservations = (double) numObservations;
+        m.numEffectiveObservations = static_cast<double>(numObservations);
       }
       else m.average = ext_mt_computeWeightedMean(fit.threadManager, y, numObservations, fit.data.weights, &m.numEffectiveObservations);
     } else {
       if (fit.data.weights == NULL) {
         m.average = ext_mt_computeIndexedMean(fit.threadManager, y, observationIndices, numObservations);
-        m.numEffectiveObservations = (double) numObservations;
+        m.numEffectiveObservations = static_cast<double>(numObservations);
       }
       else m.average = ext_mt_computeIndexedWeightedMean(fit.threadManager, y, observationIndices, numObservations, fit.data.weights, &m.numEffectiveObservations);
     }
@@ -648,11 +651,11 @@ namespace dbarts {
     }
   }
   
-  double Node::drawFromPosterior(const EndNodePrior& endNodePrior, double residualVariance) const
+  double Node::drawFromPosterior(ext_rng* rng, const EndNodePrior& endNodePrior, double residualVariance) const
   {
     if (getNumObservations() == 0) return 0.0;
       
-    return endNodePrior.drawFromPosterior(getAverage(), getNumEffectiveObservations(), residualVariance);
+    return endNodePrior.drawFromPosterior(rng, getAverage(), getNumEffectiveObservations(), residualVariance);
   }
   
   // these could potentially be multithreaded, but the gains are probably minimal
@@ -683,7 +686,7 @@ namespace dbarts {
   {
     if (childrenAreBottom()) return 1;
     if (isBottom()) return 0;
-    return (1 + (size_t) std::max(leftChild->getDepthBelow(), p.rightChild->getDepthBelow()));
+    return (1 + std::max(leftChild->getDepthBelow(), p.rightChild->getDepthBelow()));
   }
   
   size_t Node::getNumNodesBelow() const

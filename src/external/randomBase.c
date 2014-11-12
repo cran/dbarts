@@ -56,7 +56,16 @@ typedef ext_rng_mersenneTwisterState MersenneTwisterState;
 typedef ext_rng_knuthState KnuthState;
 typedef ext_rng_userFunction UserFunction;
 
-static const size_t stateLengths[] = { 3, 2, 2, sizeof(MersenneTwisterState), sizeof(KnuthState), sizeof(UserFunction), sizeof(KnuthState), 6 };
+static const size_t stateLengths[] = {
+  3 * sizeof(uint_least32_t),
+  2 * sizeof(uint_least32_t),
+  2 * sizeof(uint_least32_t),
+  sizeof(MersenneTwisterState),
+  sizeof(KnuthState),
+  sizeof(UserFunction),
+  sizeof(KnuthState),
+  6 * sizeof(uint_least32_t)
+};
 
 // this is duplicated in randomBase.c, randomNorm.c, and random.c
 struct ext_rng {
@@ -87,7 +96,7 @@ ext_rng* ext_rng_create(ext_rng_algorithm_t algorithm, const void* v_state)
     return NULL;
   }
   
-  size_t stateLength = stateLengths[algorithm] * sizeof(uint_least32_t);
+  size_t stateLength = stateLengths[algorithm];
   
   result->state = malloc(stateLength);
   if (result->state == NULL) {
@@ -307,15 +316,15 @@ static void validateSeed(ext_rng* generator, bool isFirstRun)
 #define THIRTY_TWO_BIT_INVERSE 2.328306437080797e-10 /* = 1/(2^32 - 1) */
 #define KNUTH_CONSTANT         9.31322574615479e-10
 
-// guarantees results in (0, 1)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wuninitialized"
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+// guarantees results in (0, 1)
 inline static double truncateToUnitInterval(double x) {
   if (x <= 0.0) return 0.5 * THIRTY_TWO_BIT_INVERSE;
   if ((1.0 - x) <= 0.0) return 1.0 - 0.5 * THIRTY_TWO_BIT_INVERSE;
   return x;
 }
-#pragma GCC diagnostic pop
 
 static double mersenneTwister_getNext(MersenneTwisterState* mt);
 static uint_least32_t knuth_getNext(KnuthState* kt);
@@ -414,6 +423,8 @@ double ext_rng_simulateContinuousUniform(ext_rng* generator)
 
   return truncateToUnitInterval(result);
 }
+
+#pragma GCC diagnostic pop
 
 /* ===================  Mersenne Twister ========================== */
 /* From http://www.math.keio.ac.jp/~matumoto/emt.html */

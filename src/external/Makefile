@@ -3,8 +3,8 @@ INCLUDE_DIR=../include
 PKG_CPPFLAGS=-I$(INCLUDE_DIR)
 ALL_CPPFLAGS=$(R_XTRA_CPPFLAGS) $(PKG_CPPFLAGS) $(CPPFLAGS)
 
-LOCAL_SOURCES=io.c linearAlgebra.c moments.c randomBase.c randomNorm.c random.c thread.c
-LOCAL_OBJECTS=io.o linearAlgebra.o moments.o randomBase.o randomNorm.o random.o thread.o
+LOCAL_SOURCES=adaptiveRadixTree.c binaryIO.c io.c linearAlgebra.c moments.c randomBase.c randomNorm.c random.c string.c thread.c
+LOCAL_OBJECTS=adaptiveRadixTree.o binaryIO.o io.o linearAlgebra.o moments.o randomBase.o randomNorm.o random.o string.o thread.o
 
 all : libexternal.a
 
@@ -17,14 +17,23 @@ clean :
 
 rebuild : clean all
 
+$(INCLUDE_DIR)/external/adaptiveRadixTree.h : $(INCLUDE_DIR)/external/stddef.h
 $(INCLUDE_DIR)/external/alloca.h : $(INCLUDE_DIR)/external/stddef.h
+$(INCLUDE_DIR)/external/binaryIO.h : $(INCLUDE_DIR)/external/stddef.h
 $(INCLUDE_DIR)/external/io.h :
 $(INCLUDE_DIR)/external/linearAlgebra.h : $(INCLUDE_DIR)/external/stddef.h
 $(INCLUDE_DIR)/external/random.h : $(INCLUDE_DIR)/external/stddef.h
 $(INCLUDE_DIR)/external/stats_mt.h : $(INCLUDE_DIR)/external/stddef.h $(INCLUDE_DIR)/external/thread.h
 $(INCLUDE_DIR)/external/stats.h : $(INCLUDE_DIR)/external/stddef.h
 $(INCLUDE_DIR)/external/stddef.h :
+$(INCLUDE_DIR)/external/string.h : $(INCLUDE_DIR)/external/stddef.h
 $(INCLUDE_DIR)/external/thread.h : $(INCLUDE_DIR)/external/stddef.h
+
+adaptiveRadixTree.o : adaptiveRadixTree.c $(INCLUDE_DIR)/external/adaptiveRadixTree.h
+	$(CC) $(ALL_CPPFLAGS) $(CFLAGS) -c adaptiveRadixTree.c -o adaptiveRadixTree.o
+
+binaryIO.o : binaryIO.c $(INCLUDE_DIR)/external/binaryIO.h
+	$(CC) $(ALL_CPPFLAGS) $(CFLAGS) -c binaryIO.c -o binaryIO.o
 
 io.o : io.c $(INCLUDE_DIR)/external/io.h
 	$(CC) $(ALL_CPPFLAGS) $(CFLAGS) -c io.c -o io.o
@@ -43,6 +52,9 @@ randomNorm.o : randomNorm.c $(INCLUDE_DIR)/external/random.h
 
 random.o : random.c $(INCLUDE_DIR)/external/random.h
 	$(CC) $(ALL_CPPFLAGS) $(CFLAGS) -c random.c -o random.o
+
+string.o : string.c $(INCLUDE_DIR)/external/string.h
+	$(CC) $(ALL_CPPFLAGS) $(CFLAGS) -c string.c -o string.o
 
 thread.o : thread.c pthread.c $(INCLUDE_DIR)/external/thread.h
 	$(CC) $(ALL_CPPFLAGS) $(CFLAGS) -c thread.c -o thread.o

@@ -55,30 +55,34 @@ bart <- function(
    sigest = NA_real_, sigdf = 3.0, sigquant = 0.90, 
    k = 2.0,
    power = 2.0, base = 0.95,
-   binaryOffset = 0.0,
+   binaryOffset = 0.0, weights = NULL,
    ntree = 200L,
    ndpost = 1000L, nskip = 100L,
    printevery = 100L, keepevery = 1L, keeptrainfits = TRUE,
    usequants = FALSE, numcut = 100L, printcutoffs = 0L,
-   verbose = TRUE, nthread = 1L
+   verbose = TRUE, nthread = 1L, keepcall = TRUE
 )
 {
   control <- dbartsControl(keepTrainingFits = as.logical(keeptrainfits), useQuantiles = as.logical(usequants),
                            n.burn = as.integer(nskip), n.trees = as.integer(ntree),
                            n.threads = as.integer(nthread), n.thin = as.integer(keepevery),
                            printEvery = as.integer(printevery), printCutoffs = as.integer(printcutoffs))
-  control@call <- match.call()
+  matchedCall <- if (keepcall) match.call() else call("NULL")
+  control@call <- matchedCall
+  control@n.burn <- control@n.burn %/% control@n.thin
+  control@printEvery <- control@printEvery %/% control@n.thin
+  ndpost <- as.integer(ndpost) %/% control@n.thin
 
   tree.prior <- quote(cgm(power, base))
-  tree.prior[[2]] <- power; tree.prior[[3]] <- base
+  tree.prior[[2L]] <- power; tree.prior[[3L]] <- base
 
   node.prior <- quote(normal(k))
-  node.prior[[2]] <- k
+  node.prior[[2L]] <- k
 
   resid.prior <- quote(chisq(sigdf, sigquant))
-  resid.prior[[2]] <- sigdf; resid.prior[[3]] <- sigquant
+  resid.prior[[2L]] <- sigdf; resid.prior[[3L]] <- sigquant
   
-  args <- list(formula = x.train, data = y.train, test = x.test, subset = NULL, weights = NULL,
+  args <- list(formula = x.train, data = y.train, test = x.test, subset = NULL, weights = weights,
                offset = binaryOffset, verbose = as.logical(verbose), n.samples = as.integer(ndpost),
                tree.prior = tree.prior, node.prior = node.prior,
                resid.prior = resid.prior, control = control, sigma = as.numeric(sigest))
@@ -120,5 +124,5 @@ bart <- function(
 makeind <- function(x, all = TRUE)
 {
   ignored <- all ## for R check
-  makeModelMatrixFromDataFrame(x)
+  makeModelMatrixFromDataFrame(x, TRUE)
 }

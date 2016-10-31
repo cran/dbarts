@@ -24,7 +24,7 @@ test_that("basic probit example with offset regression test", {
   expect_equal(bartFit$varcount[n.sims,], c(25, 21, 23))
 })
 
-## rm(testData)
+# rm(testData)
 
 source(system.file("common", "almostLinearBinaryData.R", package = "dbarts"))
 
@@ -50,3 +50,4 @@ test_that("binary example using close to linear function provides sensible resul
   expect_true((range(mu.hat.bart) * 1.2)[1] >= range(mu)[1])
   expect_true((range(mu.hat.bart) * 1.2)[2] <= range(mu)[2])
 })
+

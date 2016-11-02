@@ -1,4 +1,4 @@
-8cbbc3607eebb7c10395a6180519dfbc *DESCRIPTION
+d391e5e5f8b53e6c25e8b4c81eebc7cc *DESCRIPTION
 c60fc7c9492f4e8cc468fb5872028df3 *NAMESPACE
 8d553b5e4801faf0f653736aa611c7a5 *R/A_class.R
 684b449866be7d8f6f343297618843c5 *R/bart.R
@@ -16,8 +16,8 @@ c31867b99cae38e03703741346761248 *R/utility.R
 20a790e2acddd5be4de297e146fe0a7c *README.md
 a8bd0694a0ebaa76d6b8f604d41c3986 *TODO
 fd902acf231cfa0016c4295c662bdb25 *cleanup
-396f17e1122bd064819db0f73d551ff7 *configure
-13b6e00ad7deb43c958c2d6a8bcd95c8 *configure.ac
+873e0fe1f2389b47134c9898d904d32d *configure
+ff9011a227ed1bbe61ca5722cf781205 *configure.ac
 c3af46ed793ac771fa3762d361b7dd65 *configure.win
 3b0e42d2a896d65ae74760e93255a20f *inst/CITATION
 ac3917b2557dedeb46540b3e5b5b4d6d *inst/NEWS.Rd
@@ -85,11 +85,11 @@ b967e8289be53057afb907f9c4d01fdc *src/dbarts/tree.cpp
 74a0d148eb939baa6e8a299820227c48 *src/dbarts/treePrior.cpp
 b1904207e53d9cb244f966d430483c7f *src/external/Makefile
 686c7ef74099b08d329d9b2592a3bb0f *src/external/adaptiveRadixTree.c
-46999af1495c5110495b517ad8ace6fd *src/external/binaryIO.c
-3fd148276f70295a2fcaf87e1ae43cbc *src/external/config.h.in
+23dc494417ebbbf8b3a3d6c6d499c34e *src/external/binaryIO.c
+315cfc40c2100589d18d7cae5d335d45 *src/external/config.h.in
 e2d3f2b0b2f104a6b521ee803544c86f *src/external/config.h.win
 263c98d49f032dfcf07c20ad0cb090f5 *src/external/io.c
-18333f0ee05f2c8eac9283b62922b983 *src/external/linearAlgebra.c
+cef3ac4307255935a9a0d886b4ae78c3 *src/external/linearAlgebra.c
 a641e8736f15221f5f5388e76c24d5d1 *src/external/moments.c
 f78b67138d5c47a71eb25437a5a4caad *src/external/pthread.c
 8d06f9d9d102ba30a863b1204706abd6 *src/external/random.c
@@ -136,6 +136,7 @@ d41d8cd98f00b204e9800998ecf8427e *tools/build-aux/install-sh
 729039b9eb313a6ba9af51a02ff38fa7 *tools/m4/ax_check_compile_flag.m4
 754aeb7277b6cab66665780812445158 *tools/m4/ax_cxx_namespace_std.m4
 a488a4d16ee95e6ad78081d1918d9a32 *tools/m4/ax_ext.m4
+aa50e2d9af2bbc7c86d4406de8a4ba8e *tools/m4/ax_func_posix_memalign.m4
 508a38e0a018df8dd07a2bd31980f430 *tools/m4/ax_gcc_x86_avx_xgetbv.m4
 ab8de3a5954a15ed48f6998f205f4e26 *tools/m4/ax_gcc_x86_cpuid.m4
 5535e823ec44002b522873b9c0e2e0bf *tools/m4/ax_pthread.m4

@@ -1,7 +1,7 @@
 ORDINAL_VARIABLE <- 0L
 CATEGORICAL_VARIABLE <- 1L
 
-setMethod("initialize", "dbartsData",
+methods::setMethod("initialize", "dbartsData",
           function(.Object, modelMatrices, n.cuts = 100L, sigma = NA_real_)
 {
   if (!missing(modelMatrices)) {
@@ -26,7 +26,7 @@ setMethod("initialize", "dbartsData",
 validateXTest <- function(x.test, termLabels, numPredictors, predictorNames, drop)
 {
   if (is.null(x.test)) return(x.test)
-  if (is.numeric(x.test) && NCOL(x.test) == 0) return(NULL)
+  if (is.numeric(x.test) && NCOL(x.test) == 0L) return(NULL)
   if (is.data.frame(x.test)) {
     if (!is.null(termLabels))
       x.test <- model.frame(formula = as.formula(paste("~", paste(termLabels, collapse = " + "))), data = x.test)
@@ -39,14 +39,14 @@ validateXTest <- function(x.test, termLabels, numPredictors, predictorNames, dro
 
   if (is.integer(x.test)) x.test <- matrix(as.double(x.test), nrow(x.test))
   
-  if (!identical(ncol(x.test), numPredictors))
+  if (!identical(NCOL(x.test), numPredictors))
     stop("number of columns in 'test' must be equal to that of 'x'")
   if (numPredictors > 1) {
     xIsNamed    <- !is.null(predictorNames)
     testIsNamed <- !is.null(colnames(x.test))
     
     columnIndices <- seq.int(numPredictors)
-    if ((xIsNamed && !testIsNamed) || (!xIsNamed && testIsNamed)) {
+    if ((xIsNamed && !testIsNamed) || (!xIsNamed && testIsNamed) || length(unique(predictorNames)) != length(predictorNames)) {
       ## warning("'x' and 'test' are not both named; columns of test matrix will be selected by position")
     } else if (xIsNamed && testIsNamed) {
       matchIndices <- match(predictorNames, colnames(x.test))
@@ -58,7 +58,7 @@ validateXTest <- function(x.test, termLabels, numPredictors, predictorNames, dro
       }
     }
     
-    x.test <- x.test[, columnIndices]
+    x.test <- x.test[,columnIndices]
     if (xIsNamed) colnames(x.test) <- predictorNames
   }
   
@@ -259,7 +259,7 @@ dbartsData <- function(formula, data, test, subset, weights, offset, offset.test
     y <- y[subset]
 
     if (is.data.frame(formula)) formula <- makeModelMatrixFromDataFrame(formula)
-    x <- if (!is.matrix(formula)) formula[subset] else formula[subset,]
+    x <- if (!is.matrix(formula)) formula[subset] else formula[subset,,drop=FALSE]
     
     if (missing(weights)) weights <- NULL
     if (!is.null(weights)) {
@@ -270,7 +270,7 @@ dbartsData <- function(formula, data, test, subset, weights, offset, offset.test
     if (offsetIsMissing) offset <- NULL
     if (!is.null(offset)) {
       if (!is.numeric(offset)) stop("'offset' must be numeric")
-      if (length(offset) == 1) {
+      if (length(offset) == 1L) {
         offset <- rep_len(offset, initialNumObservations)
         offsetGivenAsScalar <- TRUE
       } else {
@@ -284,9 +284,10 @@ dbartsData <- function(formula, data, test, subset, weights, offset, offset.test
     completeCases <- stats::complete.cases(x, y)
     
     y <- y[completeCases]
-    x <- if (!is.matrix(x)) x[completeCases] else x[completeCases,]
+    x <- if (!is.matrix(x)) x[completeCases] else x[completeCases,,drop=FALSE]
     if (length(attributes(formula)) > 0L) for (attributeName in names(attributes(formula))) {
       if (attributeName == "dim") next
+      if (attributeName == "dimnames" && !identical(dim(formula), dim(x))) next
       attr(x, attributeName) <- attr(formula, attributeName)
     }
     if (!is.null(weights)) weights <- weights[completeCases]
@@ -306,7 +307,7 @@ dbartsData <- function(formula, data, test, subset, weights, offset, offset.test
     if (testOffsetIsMissing) {
       ## default is offset.test = offset
       if (identical(offsetGivenAsScalar, TRUE)) {
-        offset.test <- rep_len(offset[1], nrow(x.test))
+        offset.test <- rep_len(offset[1L], nrow(x.test))
         testUsesRegularOffset <- TRUE
       } else if (identical(offsetGivenAsScalar, FALSE)) {
         if (nrow(x.test) != length(y)) stop("vectored 'offset' cannot be directly applied to test data of unequal length")
@@ -327,6 +328,6 @@ dbartsData <- function(formula, data, test, subset, weights, offset, offset.test
     if (testOffsetIsMissing) offset.test <- NULL
   }
   
-  new("dbartsData", modelMatrices = namedList(y, x, x.test, weights, offset, offset.test, testUsesRegularOffset), NA_integer_, NA_real_)
+  methods::new("dbartsData", modelMatrices = namedList(y, x, x.test, weights, offset, offset.test, testUsesRegularOffset), n.cuts = NA_integer_, sigma = NA_real_)
 }
 

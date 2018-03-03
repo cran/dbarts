@@ -9,11 +9,13 @@ extern "C" {
   
   SEXP create(SEXP control, SEXP model, SEXP data);
   SEXP run(SEXP fit, SEXP numBurnIn, SEXP numSamples);
+  SEXP sampleTreesFromPrior(SEXP fit);
   
   SEXP setData(SEXP fit, SEXP data);
   SEXP setControl(SEXP fit, SEXP control);
   SEXP setModel(SEXP fit, SEXP model);
   
+  SEXP predict(SEXP fit, SEXP x_test, SEXP offset_test);
   SEXP setResponse(SEXP fit, SEXP y);
   SEXP setOffset(SEXP fit, SEXP offset);
   SEXP setPredictor(SEXP fit, SEXP x);
@@ -28,7 +30,7 @@ extern "C" {
   SEXP storeState(SEXP fit, SEXP state);
   SEXP restoreState(SEXP fit, SEXP state);
   
-  SEXP printTrees(SEXP fit, SEXP treeIndices);
+  SEXP printTrees(SEXP fit, SEXP chainIndices, SEXP sampleIndices, SEXP treeIndices);
   
   SEXP saveToFile(SEXP fit, SEXP fileName);
   SEXP loadFromFile(SEXP fileName);

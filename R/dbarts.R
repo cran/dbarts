@@ -12,21 +12,27 @@ setMethod("initialize", "dbartsControl",
 ## isn't part of class
 dbartsControl <-
   function(verbose = FALSE, keepTrainingFits = TRUE, useQuantiles = FALSE,
+           runMode = c("sequentialUpdates", "fixedSamples"),
            n.samples = NA_integer_, n.cuts = 100L,
-           n.burn = 100L, n.trees = 200L, n.threads = 1L,
-           n.thin = 1L, printEvery = 100L, printCutoffs = 0L, updateState = TRUE)
+           n.burn = 200L, n.trees = 75L, n.chains = 4L, n.threads = guessNumCores(),
+           n.thin = 1L, printEvery = 100L, printCutoffs = 0L,
+           rngKind = "default", rngNormalKind = "default", updateState = TRUE)
 {
   result <- new("dbartsControl",
                 verbose = as.logical(verbose),
                 keepTrainingFits = as.logical(keepTrainingFits),
                 useQuantiles = as.logical(useQuantiles),
+                runMode = as.character(runMode[1L]),
                 n.samples = coerceOrError(n.samples, "integer"),
                 n.burn = coerceOrError(n.burn, "integer"),
                 n.trees = coerceOrError(n.trees, "integer"),
+                n.chains = coerceOrError(n.chains, "integer"),
                 n.threads = coerceOrError(n.threads, "integer"),
                 n.thin = coerceOrError(n.thin, "integer"),
                 printEvery = coerceOrError(printEvery, "integer"),
                 printCutoffs = coerceOrError(printCutoffs, "integer"),
+                rngKind = rngKind,
+                rngNormalKind = rngNormalKind,
                 updateState = as.logical(updateState))
   
   n.cuts <- coerceOrError(n.cuts, "integer")
@@ -36,7 +42,7 @@ dbartsControl <-
   result
 }
 
-validateArgumentsInEnvironment <- function(envir, control, verbose, n.samples, sigma)
+validateArgumentsInEnvironment <- function(envir, func, control, verbose, n.samples, sigma)
 {
   controlIsMissing <- missing(control)
   
@@ -62,7 +68,7 @@ validateArgumentsInEnvironment <- function(envir, control, verbose, n.samples, s
       stop("'n.samples' argument to dbarts must be a non-negative integer")
     envir$control@n.samples <- n.samples
   } else if (controlIsMissing || is.na(control@n.samples)) {
-    envir$control@n.samples <- formals(dbarts)[["n.samples"]]
+    envir$control@n.samples <- formals(func)[["n.samples"]]
   }
 
   if (!missing(sigma) && !is.na(sigma)) {
@@ -76,32 +82,37 @@ validateArgumentsInEnvironment <- function(envir, control, verbose, n.samples, s
 }
 
 dbarts <- function(formula, data, test, subset, weights, offset, offset.test = offset,
-                   verbose = FALSE, n.samples = 1000L,
+                   verbose = FALSE, n.samples = 800L,
                    tree.prior = cgm, node.prior = normal, resid.prior = chisq,
                    control = dbartsControl(), sigma = NA_real_)
 {
   matchedCall <- match.call()
+  
+  evalEnv <- parent.frame(1L)
 
-  validateCall <- prepareCallWithArguments(matchedCall, quoteInNamespace(validateArgumentsInEnvironment), "control", "verbose", "n.samples", "sigma")
+  validateCall <- redirectCall(matchedCall, quoteInNamespace(validateArgumentsInEnvironment))
   validateCall <- addCallArgument(validateCall, 1L, sys.frame(sys.nframe()))
-  eval(validateCall, parent.frame(1L), getNamespace("dbarts"))
+  validateCall <- addCallArgument(validateCall, 2L, dbarts::dbarts)
+  eval(validateCall, evalEnv, getNamespace("dbarts"))
 
   if (length(control@call) == 1L && control@call == call("NA")) control@call <- matchedCall
   control@verbose <- verbose
 
-  dataCall <- prepareCallWithArguments(matchedCall, quoteInNamespace(dbartsData), "formula", "data", "test", "subset", "weights", "offset", "offset.test")
-  data <- eval(dataCall, parent.frame(1L))
+  dataCall <- redirectCall(matchedCall, quoteInNamespace(dbartsData))
+  data <- eval(dataCall, evalEnv)
   #cat("x address after dbartsData call: ", .Call("dbarts_getPointerAddress", data@x), "\n", sep = "")
   
   data@n.cuts <- rep_len(attr(control, "n.cuts"), ncol(data@x))
   data@sigma  <- sigma
   attr(control, "n.cuts") <- NULL
   
-  if (is.na(data@sigma) && !control@binary)
-    data@sigma <- summary(lm(data@y ~ data@x, weights = data@weights, offset = data@offset))$sigma
-    
+  
   uniqueResponses <- unique(data@y)
   if (length(uniqueResponses) == 2 && all(sort(uniqueResponses) == c(0, 1))) control@binary <- TRUE
+  
+  if (is.na(data@sigma) && !control@binary)
+    data@sigma <- summary(lm(data@y ~ data@x, weights = data@weights, offset = data@offset))$sigma
+  
   ## bart will passthrough with offset == something no matter what, which we can NULL out
   if (!control@binary && !is.null(data@offset) && all(data@offset == 0.0)) {
     data@offset <- NULL
@@ -111,11 +122,11 @@ dbarts <- function(formula, data, test, subset, weights, offset, offset.test = o
   }
   #cat("x address after updating data: ", .Call("dbarts_getPointerAddress", data@x), "\n", sep = "")
 
-  parsePriorsCall <- prepareCallWithArguments(matchedCall, quoteInNamespace(parsePriors), "tree.prior", "node.prior", "resid.prior")
+  parsePriorsCall <- redirectCall(matchedCall, quoteInNamespace(parsePriors))
   parsePriorsCall <- setDefaultsFromFormals(parsePriorsCall, formals(dbarts), "tree.prior", "node.prior", "resid.prior")
   parsePriorsCall$control <- control
   parsePriorsCall$data <- data
-  parsePriorsCall$parentEnv <- parent.frame(1L)
+  parsePriorsCall$parentEnv <- evalEnv
   priors <- eval(parsePriorsCall)
 
   model <- new("dbartsModel", priors$tree.prior, priors$node.prior, priors$resid.prior)
@@ -126,7 +137,8 @@ dbarts <- function(formula, data, test, subset, weights, offset, offset.test = o
   result
 }
 
-setClassUnion("dbartsStateOrNULL", c("dbartsState", "NULL"))
+
+setClassUnion("listOrNULL", c("list", "NULL"))
 
 dbartsSampler <-
   setRefClass("dbartsSampler",
@@ -135,7 +147,7 @@ dbartsSampler <-
                 control = "dbartsControl",
                 model   = "dbartsModel",
                 data    = "dbartsData",
-                state   = "dbartsStateOrNULL"
+                state   = "listOrNULL"
                 ),
               methods = list(
                 initialize =
@@ -170,6 +182,18 @@ dbartsSampler <-
                   
                   samples
                 },
+                sampleTreesFromPrior = function(updateState = NA) {
+                  'Draws tree structure from prior; does not update tree predictions, so sampler
+                   will be in invalid state'
+                  
+                  ptr <- getPointer()
+                  samples <- .Call(C_dbarts_sampleTreesFromPrior, ptr)
+
+                  if ((is.na(updateState) && control@updateState == TRUE) || identical(updateState, TRUE))
+                    storeState(ptr)
+
+                  invisible(NULL)
+                },
                 copy = function(shallow = FALSE) {
                   'Creates a deep or shallow copy of the sampler.'
                   dupe <-
@@ -183,20 +207,22 @@ dbartsSampler <-
                       if (!is.null(data@x.test)) {
                         newData@x.test <- .Call(C_dbarts_deepCopy, data@x.test)
                       }
-                      dupe <- dbartsSampler$new(control, model, newData)
+                      dbartsSampler$new(control, model, newData)
                     }
-
+                  
                   if (!is.null(state)) {
                     newState <- state
-                    newState@fit.tree <- .Call(C_dbarts_deepCopy, state@fit.tree)
-                    newState@fit.total <- .Call(C_dbarts_deepCopy, state@fit.total)
-                    if (!is.null(data@x.test)) {
-                      newState@fit.test <- .Call(C_dbarts_deepCopy, state@fit.test)
+                    for (chainNum in seq_len(control@n.chains)) {
+                      newState[[chainNum]]@fit.tree <- .Call(C_dbarts_deepCopy, state[[chainNum]]@fit.tree)
+                      newState[[chainNum]]@fit.total <- .Call(C_dbarts_deepCopy, state[[chainNum]]@fit.total)
+                      if (!is.null(data@x.test)) {
+                        newState[[chainNum]]@fit.test <- .Call(C_dbarts_deepCopy, state[[chainNum]]@fit.test)
+                      }
+                      newState[[chainNum]]@sigma <- .Call(C_dbarts_deepCopy, state[[chainNum]]@sigma)
+                      newState[[chainNum]]@trees <- .Call(C_dbarts_deepCopy, state[[chainNum]]@trees)
                     }
-                    newState@sigma <- .Call(C_dbarts_deepCopy, state@sigma)
-                    newState@runningTime <- .Call(C_dbarts_deepCopy, state@runningTime)
-                    newState@trees <- .Call(C_dbarts_deepCopy, state@trees)
-
+                    attr(newState, "runningTime") <- .Call(C_dbarts_deepCopy, attr(state, "runningTime"))
+                    
                     dupe$setState(newState)
                   }
                   
@@ -210,38 +236,51 @@ dbartsSampler <-
                   writeLines(deparse(control@call))
                   cat("\n")
                   
-                  ##xDisplay <- NULL
-                  ##stringConnection <- textConnection("xDisplay", "w", local = TRUE)
-                  ##sink(stringConnection)
-                    
-                  ##cat("  x:")
-                  ##if (!is.null(colnames(data@x))) {
-                  ##  for (i in 1:min(ncol(data@x), 10)) cat(sprintf(" %8.8s", colnames(data@x)[i]))
-                  ##  if (ncol(data@x) > 10) cat(" ...")
-                  ##  cat("\n")
-                  ##  for (i in 1:min(nrow(data@x), 3)) {
-                  ##    cat("    ")
-                  ##    for (j in 1:min(ncol(data@x), 10)) cat(sprintf("     %4.4s", data@x[i,j]))
-                  ##    cat("\n")
-                  ##  }
-                  ##}
-                  ##sink()
-                  ##close(stringConnection)
-                    
-                  ##writeLines(xDisplay)
-                  
                   invisible(NULL)
+                },
+                predict = function(x.test, offset.test) {
+                  'Using existing sampler to predict for new data without re-running.'
+                  
+                  selfEnv <- parent.env(environment())
+                  
+                  if (control@runMode == "sequentialUpdates" && (is.null(selfEnv$runModeWarnOnce) || self$runModeWarnOnce == FALSE)) {
+                    warning("predict with sequential update run mode yields single result")
+                    selfEnv$runModeWarnOnce <- TRUE
+                  }
+                   
+                  ptr <- getPointer()
+                  
+                  x.test <- validateXTest(x.test, attr(data@x, "term.labels"), ncol(data@x), colnames(data@x), attr(data@x, "drop"))
+                  if (is.null(x.test)) stop("x.test cannot be NULL")
+                  
+                  if (missing(offset.test) || is.null(offset.test)) {
+                    offset.test <- NA_real_
+                  } else {
+                    offset.test <- as.double(offset.test)
+                    if (length(offset.test) == 1)
+                      offset.test <- rep_len(offset, nrow(x.test))
+                    if (!identical(length(offset.test), nrow(x.test)))
+                      stop("length of test offset must be equal to number of rows in test matrix")
+                  }
+                  
+                  .Call(C_dbarts_predict, ptr, x.test, offset.test)
                 },
                 setControl = function(newControl) {
                   'Sets the control object for the sampler to a new one. Preserves the call() slot.'
                   
                   if (!inherits(newControl, "dbartsControl")) stop("'control' must inherit from dbartsControl")
-
+                  
+                  selfEnv <- parent.env(environment())
+                  
+                  if (control@runMode != newControl@runMode && (is.null(selfEnv$runModeWarnOnce) || selfEnv$runModeWarnOnce == FALSE)) {
+                    warning("changing the run mode can yield a sampler with an inconsistent state")
+                    selfEnv$runModeWarnOnce <- TRUE
+                  }
+                  
                   newControl@binary <- control@binary
                   newControl@call   <- control@call
                   
                   ptr <- getPointer()
-                  selfEnv <- parent.env(environment())
                   
                   selfEnv$control <- newControl
                   .Call(C_dbarts_setControl, ptr, control)
@@ -339,6 +378,13 @@ dbartsSampler <-
                 },
                 setPredictor = function(x, column, updateState = NA) {
                   'Changes a single column of the predictor matrix, or the entire matrix itself if the column argument is missing. TRUE/FALSE returned as to whether or not the operation was successful.'
+                  
+                  selfEnv <- parent.env(environment())
+                  
+                  if (control@runMode == "fixedSamples" && (is.null(selfEnv$runModeWarnOnce) || self$runModeWarnOnce == FALSE)) {
+                    warning("changing predictor with fixed samples can render old predictions invalid")
+                    selfEnv$runModeWarnOnce <- TRUE
+                  }
 
                   columnIsMissing <- missing(column)
 
@@ -352,7 +398,6 @@ dbartsSampler <-
                   x <- if (is.matrix(x)) matrix(as.double(x), nrow(x)) else as.double(x)
                   
                   ptr <- getPointer()
-                  selfEnv <- parent.env(environment())
                   
                   updateSuccessful <-
                     if (columnIsMissing) {
@@ -396,40 +441,37 @@ dbartsSampler <-
                   invisible(NULL)
                 },
                 setTestPredictorAndOffset = function(x.test, offset.test, updateState = NA) {
-                   'Changes the test predictor matrix, and optionally the test offset.'
-                   ptr <- getPointer()
-                   selfEnv <- parent.env(environment())
-
-                   x.test <- validateXTest(x.test, attr(data@x, "term.labels"), ncol(data@x), colnames(data@x), attr(data@x, "drop"))
-
-                   if (!missing(offset.test)) {
-                     if (is.null(x.test)) {
-                       if (!is.null(offset.test)) stop("when test matrix is NULL, test offset must be as well")
-                     } else {
-                       if (!is.null(offset.test)) {
-                         offset.test <- as.double(offset.test)
-                         if (length(offset.test) == 1) {
-                           offset.test <- rep_len(offset, nrow(x.test))
-                         }
-                         if (!identical(length(offset.test), nrow(x.test))) {
-                           stop("length of test offset must be equal to number of rows in test matrix")
-                         }
-                       }
-                     }
-                     selfEnv$data@testUsesRegularOffset <- FALSE
-
-                     selfEnv$data@x.test <- x.test
-                     selfEnv$data@offset.test <- offset.test
-                     .Call(C_dbarts_setTestPredictorAndOffset, ptr, data@x.test, data@offset.test)
-                   } else {
-                     selfEnv$data@x.test <- x.test
-                     .Call(C_dbarts_setTestPredictorAndOffset, ptr, data@x.test, NA_real_)
-                   }
-
-                   if ((is.na(updateState) && control@updateState == TRUE) || identical(updateState, TRUE))
-                     storeState(ptr)
-
-                   invisible(NULL)
+                  'Changes the test predictor matrix, and optionally the test offset.'
+                  ptr <- getPointer()
+                  selfEnv <- parent.env(environment())
+                  
+                  x.test <- validateXTest(x.test, attr(data@x, "term.labels"), ncol(data@x), colnames(data@x), attr(data@x, "drop"))
+                  
+                  if (!missing(offset.test)) {
+                    if (is.null(x.test)) {
+                      if (!is.null(offset.test)) stop("when test matrix is NULL, test offset must be as well")
+                    } else {
+                      if (!is.null(offset.test)) {
+                        offset.test <- as.double(offset.test)
+                        if (length(offset.test) == 1) {
+                          offset.test <- rep_len(offset, nrow(x.test))
+                        }
+                        if (!identical(length(offset.test), nrow(x.test))) {
+                          stop("length of test offset must be equal to number of rows in test matrix")
+                        }
+                      }
+                    }
+                    selfEnv$data@testUsesRegularOffset <- FALSE
+                    selfEnv$data@x.test <- x.test
+                    selfEnv$data@offset.test <- offset.test
+                    .Call(C_dbarts_setTestPredictorAndOffset, ptr, data@x.test, data@offset.test)
+                  } else {
+                    selfEnv$data@x.test <- x.test
+                    .Call(C_dbarts_setTestPredictorAndOffset, ptr, data@x.test, NA_real_)
+                  }
+                  if ((is.na(updateState) && control@updateState == TRUE) || identical(updateState, TRUE))
+                    storeState(ptr)
+                  invisible(NULL)
                 },
                 setTestOffset = function(offset.test, updateState = NA) {
                   'Changes the test offset.'
@@ -472,7 +514,11 @@ dbartsSampler <-
                 },
                 setState = function(newState) {
                   'Sets the internal state from a cache.'
-                  if (!is(newState, "dbartsState")) stop("'state' must inherit from dbartsState")
+                  
+                  if (!is.list(newState)) stop("'state' must be a list of dbartsState objects")
+                  if (length(newState) != control@n.chains) stop("'state' length must equal number of chains")
+                  for (chainNum in seq_along(newState))
+                    if (!is(newState[[chainNum]], "dbartsState")) stop("'state' must inherit from dbartsState")
                   
                   selfEnv <- parent.env(environment())
                   if (.Call(C_dbarts_isValidPointer, pointer) == FALSE) {
@@ -501,11 +547,11 @@ dbartsSampler <-
 
                   invisible(NULL)
                 },
-                printTrees = function(treeNums = seq_len(control@n.trees)) {
+                printTrees = function(chainNums = seq_len(control@n.chains), sampleNums = seq_len(control@n.samples), treeNums = seq_len(control@n.trees)) {
                   'Produces an info dump of the internal state of the trees.'
                   
                   ptr <- getPointer()
-                  invisible(.Call(C_dbarts_printTrees, ptr, as.integer(treeNums)))
+                  invisible(.Call(C_dbarts_printTrees, ptr, as.integer(chainNums), as.integer(sampleNums), as.integer(treeNums)))
                 },
                 plotTree = function(treeNum, treePlotPars = list(nodeHeight = 12, nodeWidth = 40, nodeGap = 8), ...) {
                   'Minimialist visualization of tree branching and contents.'

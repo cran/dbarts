@@ -1,29 +1,39 @@
-packageBartResults <- function(fit, samples, burnInSigma = NULL)
+packageSamples <- function(fit, combineChains, samples) {
+  x <- NULL
+  if (fit$control@n.chains <= 1L) {
+    if (is.matrix(samples)) t(samples) else samples
+  } else {
+    if (length(dim(samples)) > 2L) {
+      if (!combineChains) aperm(samples, c(3L, 2L, 1L)) else evalx(dim(samples), t(matrix(samples, x[1L], x[2L] * x[3L])))
+    } else {
+      if (!combineChains) t(samples) else as.vector(samples)
+    }
+  }
+}
+
+packageBartResults <- function(fit, samples, burnInSigma, combineChains)
 {
   responseIsBinary <- fit$control@binary
-
+  
   yhat.train <- NULL
   yhat.train.mean <- NULL
   if (fit$control@keepTrainingFits) {
-    yhat.train <- t(samples$train)
-    if (!responseIsBinary) yhat.train.mean <- apply(yhat.train, 2, mean)
+    yhat.train <- packageSamples(fit, combineChains, samples$train)
+    if (!responseIsBinary) yhat.train.mean <- apply(yhat.train, length(dim(yhat.train)), mean)
   }
 
   yhat.test <- NULL
   yhat.test.mean <- NULL
   if (NROW(fit$data@x.test) > 0) {
-    yhat.test <- t(samples$test)
-    if (!responseIsBinary) yhat.test.mean <- apply(yhat.test, 2, mean)
+    yhat.test <- packageSamples(fit, combineChains, samples$test)
+    if (!responseIsBinary) yhat.test.mean <- apply(yhat.test, length(dim(yhat.test)), mean)
   }
 
-  if (!responseIsBinary) sigma <- samples$sigma
+  if (!responseIsBinary) sigma <- packageSamples(fit, combineChains, samples$sigma)
     
-  ##if (responseIsBinary && !is.null(fit$data@offset)) {
-  ##  if (fit$control@keepTrainingFits) yhat.train <- yhat.train + fit$data@offset
-  ##  if (NROW(fit$data@x.test) > 0)    yhat.test  <- yhat.test  + fit$data@offset
-  ##}
-
-  varcount <- t(samples$varcount)
+  varcount <- packageSamples(fit, combineChains, samples$varcount)
+  
+  if (!is.null(burnInSigma)) burnInSigma <- packageSamples(fit, combineChains, burnInSigma)
   
   if (responseIsBinary) {
     result <- list(
@@ -45,32 +55,122 @@ packageBartResults <- function(fit, samples, burnInSigma = NULL)
       varcount = varcount,
       y = fit$data@y)
   }
+  
+  if (fit$control@runMode == "fixedSamples")
+    result$fit <- fit
+  
   class(result) <- 'bart'
   invisible(result)
 }
 
+bart2 <- function(
+  formula, data, test, subset, weights, offset, offset.test = offset,
+  sigest = NA_real_, sigdf = 3.0, sigquant = 0.90,
+  k = 2.0,
+  power = 2.0, base = 0.95,
+  n.trees = 75L,
+  n.samples = 500L, n.burn = 500L,
+  n.chains = 4L, n.threads = min(guessNumCores(), n.chains), combineChains = FALSE,
+  n.cuts = 100L, useQuantiles = FALSE,
+  n.thin = 1L, keepTrainingFits = TRUE,
+  printEvery = 100L, printCutoffs = 0L,
+  verbose = TRUE,
+  keepTrees = TRUE, keepCall = TRUE, ...
+)
+{
+  matchedCall <- match.call()
+  callingEnv <- parent.frame()
+  
+  argNames <- names(matchedCall)[-1L]
+  unknownArgs <- argNames %not_in% names(formals(dbarts::bart2)) & argNames %not_in% names(formals(dbarts::dbartsControl))
+  if (any(unknownArgs))
+    stop("unknown arguments: '", paste0(argNames[unknownArgs], collapse = "', '"), "'")
+  
+  controlCall <- redirectCall(matchedCall, dbarts::dbartsControl)
+  control <- eval(controlCall, envir = callingEnv)
+  
+  control@call <- if (keepCall) matchedCall else call("NULL")
+  control@n.burn     <- control@n.burn     %/% control@n.thin
+  control@n.samples  <- control@n.samples  %/% control@n.thin
+  control@printEvery <- control@printEvery %/% control@n.thin
+  if (control@n.burn == 0L && keepTrees == TRUE) control@runMode <- "fixedSamples"
+  
+  tree.prior <- quote(cgm(power, base))
+  tree.prior[[2L]] <- power; tree.prior[[3L]] <- base
+
+  node.prior <- quote(normal(k))
+  node.prior[[2L]] <- k
+
+  resid.prior <- quote(chisq(sigdf, sigquant))
+  resid.prior[[2L]] <- sigdf; resid.prior[[3L]] <- sigquant
+  
+  samplerCall <- redirectCall(matchedCall, dbarts::dbarts)
+  samplerCall$control <- control
+  samplerCall$sigma <- as.numeric(sigest)
+  
+  sampler <- eval(samplerCall, envir = callingEnv)
+  
+  control <- sampler$control
+  
+  sampler$sampleTreesFromPrior()
+  
+  burnInSigma <- NULL
+  if (n.burn > 0L) {
+    oldX.test <- sampler$data@x.test
+    oldOffset.test <- sampler$data@offset.test
+    
+    oldKeepTrainingFits <- control@keepTrainingFits
+    oldVerbose <- control@verbose
+
+    if (length(oldX.test) > 0) sampler$setTestPredictorAndOffset(NULL, NULL, updateState = FALSE)
+    control@keepTrainingFits <- FALSE
+    control@verbose <- FALSE
+    sampler$setControl(control)
+
+    burnInSigma <- sampler$run(0L, control@n.burn, FALSE)$sigma
+    
+    if (length(oldX.test) > 0) sampler$setTestPredictorAndOffset(oldX.test, oldOffset.test, updateState = FALSE)
+    control@keepTrainingFits <- oldKeepTrainingFits
+    control@verbose <- oldVerbose
+    if (keepTrees == TRUE) control@runMode <- "fixedSamples"
+    suppressWarnings(sampler$setControl(control))
+
+    samples <- sampler$run(0L, control@n.samples)
+  } else {
+    samples <- sampler$run()
+  }
+
+  result <- packageBartResults(sampler, samples, burnInSigma, combineChains)
+  
+  result
+}
 
 bart <- function(
-   x.train, y.train, x.test = matrix(0.0, 0L, 0L),
-   sigest = NA_real_, sigdf = 3.0, sigquant = 0.90, 
-   k = 2.0,
-   power = 2.0, base = 0.95,
-   binaryOffset = 0.0, weights = NULL,
-   ntree = 200L,
-   ndpost = 1000L, nskip = 100L,
-   printevery = 100L, keepevery = 1L, keeptrainfits = TRUE,
-   usequants = FALSE, numcut = 100L, printcutoffs = 0L,
-   verbose = TRUE, nthread = 1L, keepcall = TRUE
+  x.train, y.train, x.test = matrix(0.0, 0L, 0L),
+  sigest = NA_real_, sigdf = 3.0, sigquant = 0.90, 
+  k = 2.0,
+  power = 2.0, base = 0.95,
+  binaryOffset = 0.0, weights = NULL,
+  ntree = 200L,
+  ndpost = 1000L, nskip = 100L,
+  printevery = 100L, keepevery = 1L, keeptrainfits = TRUE,
+  usequants = FALSE, numcut = 100L, printcutoffs = 0L,
+  verbose = TRUE, nchain = 1L, nthread = 1L, combinechains = TRUE,
+  keeptrees = FALSE,
+  keepcall = TRUE
 )
 {
   control <- dbartsControl(keepTrainingFits = as.logical(keeptrainfits), useQuantiles = as.logical(usequants),
-                           n.burn = as.integer(nskip), n.trees = as.integer(ntree),
+                           runMode = "sequentialUpdates",
+                           n.burn = as.integer(nskip), n.trees = as.integer(ntree), n.chains = as.integer(nchain),
                            n.threads = as.integer(nthread), n.thin = as.integer(keepevery),
-                           printEvery = as.integer(printevery), printCutoffs = as.integer(printcutoffs))
+                           printEvery = as.integer(printevery), printCutoffs = as.integer(printcutoffs),
+                           n.cuts = numcut)
   matchedCall <- if (keepcall) match.call() else call("NULL")
   control@call <- matchedCall
   control@n.burn <- control@n.burn %/% control@n.thin
   control@printEvery <- control@printEvery %/% control@n.thin
+  if (control@n.burn == 0L && keeptrees == TRUE) control@runMode <- "fixedSamples"
   ndpost <- as.integer(ndpost) %/% control@n.thin
 
   tree.prior <- quote(cgm(power, base))
@@ -86,7 +186,7 @@ bart <- function(
                offset = binaryOffset, verbose = as.logical(verbose), n.samples = as.integer(ndpost),
                tree.prior = tree.prior, node.prior = node.prior,
                resid.prior = resid.prior, control = control, sigma = as.numeric(sigest))
-  sampler <- do.call("dbarts", args, envir = parent.frame(1L))
+  sampler <- do.call(dbarts::dbarts, args, envir = parent.frame(1L))
 
   control <- sampler$control
   
@@ -100,7 +200,6 @@ bart <- function(
 
     if (length(x.test) > 0) sampler$setTestPredictorAndOffset(NULL, NULL, updateState = FALSE)
     control@keepTrainingFits <- FALSE
-    control@verbose <- FALSE
     sampler$setControl(control)
 
     burnInSigma <- sampler$run(0L, control@n.burn, FALSE)$sigma
@@ -108,17 +207,17 @@ bart <- function(
     if (length(x.test) > 0) sampler$setTestPredictorAndOffset(oldX.test, oldOffset.test, updateState = FALSE)
     control@keepTrainingFits <- oldKeepTrainingFits
     control@verbose <- oldVerbose
-    sampler$setControl(control)
+    if (keeptrees == TRUE) control@runMode <- "fixedSamples"
+    suppressWarnings(sampler$setControl(control))
 
     samples <- sampler$run(0L, control@n.samples)
   } else {
     samples <- sampler$run()
   }
 
-  result <- packageBartResults(sampler, samples, burnInSigma)
-  rm(sampler, samples)
+  result <- packageBartResults(sampler, samples, burnInSigma, combinechains)
   
-  return(result)
+  result
 }
 
 makeind <- function(x, all = TRUE)
@@ -126,3 +225,22 @@ makeind <- function(x, all = TRUE)
   ignored <- all ## for R check
   makeModelMatrixFromDataFrame(x, TRUE)
 }
+
+predict.bart <- function(object, test, offset.test, combineChains, ...)
+{
+  if (is.null(object$fit)) {
+    if (as.character(object$call[[1L]]) == "bart2")
+      stop("predict requires bart2 to be called with 'keepTrees' == TRUE")
+    else
+      stop("predict requires bart to be called with 'keeptrees' == TRUE")
+  }
+  
+  if (missing(combineChains))
+    combineChains <- object$fit$control@n.chains <= 1L || length(dim(object$varcount)) <= 2L
+  if (missing(offset.test)) offset.test <- NULL
+  
+  result <- object$fit$predict(test, offset.test)
+  
+  packageSamples(object$fit, combineChains, result)
+}
+

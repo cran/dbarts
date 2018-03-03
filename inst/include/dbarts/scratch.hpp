@@ -2,21 +2,30 @@
 #ifndef DBARTS_SCRATCH_HPP
 #define DBARTS_SCRATCH_HPP
 
+#include <cstddef>
 #include "cstdint.hpp" // int types
 
 namespace dbarts {
   struct ScaleFactor { double min, max, range; };
   
-  struct Scratch {
-    const double* yRescaled; // this isn't strictly const, but can only be modified in very select ways
+  struct SharedScratch {
+    const double* yRescaled;
     const double* xt; // x transpose
     const double* xt_test;
-    double* treeY;
     
     ScaleFactor dataScale;
     
     const std::uint32_t* numCutsPerVariable;
     const double* const* cutPoints;
+  };
+  struct ChainScratch {
+    double* treeY;
+    double* probitLatents;
+    
+    double* totalFits;     // numObs
+    double* totalTestFits; // numTestObs
+    
+    std::size_t taskId;
   };
 } // namespace dbarts
 

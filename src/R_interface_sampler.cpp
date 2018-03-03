@@ -76,10 +76,10 @@ extern "C" {
     size_t numBurnIn, numSamples;
     
     i_temp = rc_getInt(numBurnInExpr, "number of burn-in steps", RC_LENGTH | RC_GEQ, asRXLen(1), RC_VALUE | RC_GEQ, 0, RC_NA | RC_YES, RC_END);
-    numBurnIn = i_temp == NA_INTEGER ? fit->control.numBurnIn : static_cast<size_t>(i_temp);
+    numBurnIn = i_temp == NA_INTEGER ? fit->control.defaultNumBurnIn : static_cast<size_t>(i_temp);
     
     i_temp = rc_getInt(numSamplesExpr, "number of samples", RC_LENGTH | RC_GEQ, asRXLen(1), RC_VALUE | RC_GEQ, 0, RC_NA | RC_YES, RC_END);    
-    numSamples = i_temp == NA_INTEGER ? fit->control.numSamples : static_cast<size_t>(i_temp);
+    numSamples = i_temp == NA_INTEGER ? fit->control.defaultNumSamples : static_cast<size_t>(i_temp);
     
     if (numBurnIn == 0 && numSamples == 0) Rf_error("either number of burn-in or samples must be positive");
     
@@ -119,20 +119,31 @@ extern "C" {
     SET_VECTOR_ELT(resultExpr, 3, rc_newInteger(asRXLen(bartResults->getNumVariableCountSamples())));
     
     SEXP sigmaSamples = VECTOR_ELT(resultExpr, 0);
+    if (fit->control.numChains > 1)
+      rc_setDims(sigmaSamples, static_cast<int>(bartResults->numSamples), static_cast<int>(fit->control.numChains), -1);
     std::memcpy(REAL(sigmaSamples), const_cast<const double*>(bartResults->sigmaSamples), bartResults->getNumSigmaSamples() * sizeof(double));
     
     SEXP trainingSamples = VECTOR_ELT(resultExpr, 1);
-    rc_setDims(trainingSamples, static_cast<int>(bartResults->numObservations), static_cast<int>(bartResults->numSamples), -1);
+    if (fit->control.numChains <= 1)
+      rc_setDims(trainingSamples, static_cast<int>(bartResults->numObservations), static_cast<int>(bartResults->numSamples), -1);
+    else
+      rc_setDims(trainingSamples, static_cast<int>(bartResults->numObservations), static_cast<int>(bartResults->numSamples), static_cast<int>(fit->control.numChains), -1);
     std::memcpy(REAL(trainingSamples), const_cast<const double*>(bartResults->trainingSamples), bartResults->getNumTrainingSamples() * sizeof(double));
     
     if (fit->data.numTestObservations > 0) {
       SEXP testSamples = VECTOR_ELT(resultExpr, 2);
-      rc_setDims(testSamples, static_cast<int>(bartResults->numTestObservations), static_cast<int>(bartResults->numSamples), -1);
+      if (fit->control.numChains <= 1)
+        rc_setDims(testSamples, static_cast<int>(bartResults->numTestObservations), static_cast<int>(bartResults->numSamples), -1);
+      else
+        rc_setDims(testSamples, static_cast<int>(bartResults->numTestObservations), static_cast<int>(bartResults->numSamples), static_cast<int>(fit->control.numChains), -1);
       std::memcpy(REAL(testSamples), const_cast<const double*>(bartResults->testSamples), bartResults->getNumTestSamples() * sizeof(double));
     }
     
     SEXP variableCountSamples = VECTOR_ELT(resultExpr, 3);
-    rc_setDims(variableCountSamples, static_cast<int>(bartResults->numPredictors), static_cast<int>(bartResults->numSamples), -1);
+    if (fit->control.numChains <= 1)
+      rc_setDims(variableCountSamples, static_cast<int>(bartResults->numPredictors), static_cast<int>(bartResults->numSamples), -1);
+    else
+      rc_setDims(variableCountSamples, static_cast<int>(bartResults->numPredictors), static_cast<int>(bartResults->numSamples), static_cast<int>(fit->control.numChains), -1);
     int* variableCountStorage = INTEGER(variableCountSamples);
     size_t length = bartResults->getNumVariableCountSamples();
     // these likely need to be down-sized from 64 to 32 bits
@@ -155,6 +166,19 @@ extern "C" {
     return resultExpr;
   }
   
+  SEXP sampleTreesFromPrior(SEXP fitExpr)
+  {
+    BARTFit* fit = static_cast<BARTFit*>(R_ExternalPtrAddr(fitExpr));
+    if (fit == NULL) Rf_error("dbarts_sampleTreesFromPrior called on NULL external pointer");
+        
+    GetRNGstate();
+    
+    fit->sampleTreesFromPrior();
+    
+    PutRNGstate();
+    
+    return R_NilValue;
+  }
   
   SEXP setData(SEXP fitExpr, SEXP dataExpr)
   {
@@ -195,14 +219,12 @@ extern "C" {
     
     Control oldControl = fit->control;
     
-    if (control.responseIsBinary != oldControl.responseIsBinary) {
-      ext_rng_destroy(control.rng);
+    if (control.responseIsBinary != oldControl.responseIsBinary)
       Rf_error("new control cannot change binary characteristic of response");
-    }
+    if (control.numChains != oldControl.numChains)
+      Rf_error("new control cannot change number of chains");
     
     fit->setControl(control);
-    
-    ext_rng_destroy(oldControl.rng);
     
     return R_NilValue;
   }
@@ -224,6 +246,49 @@ extern "C" {
     invalidateModel(oldModel);
     
     return R_NilValue;
+  }
+  
+  SEXP predict(SEXP fitExpr, SEXP x_testExpr, SEXP offset_testExpr)
+  {
+    const BARTFit* fit = static_cast<const BARTFit*>(R_ExternalPtrAddr(fitExpr));
+    if (fit == NULL) Rf_error("dbarts_predict called on NULL external pointer");
+    
+    const Control& control(fit->control);
+    
+    if (Rf_isNull(x_testExpr) || rc_isS4Null(x_testExpr)) return R_NilValue;
+    
+    if (!Rf_isReal(x_testExpr)) Rf_error("x.test must be of type real");
+    
+    rc_assertDimConstraints(x_testExpr, "dimensions of x_test", RC_LENGTH | RC_EQ, rc_asRLength(2),
+                            RC_NA,
+                            RC_VALUE | RC_EQ, static_cast<int>(fit->data.numPredictors),
+                            RC_END);
+    int* dims = INTEGER(Rf_getAttrib(x_testExpr, R_DimSymbol));
+    
+    size_t numSamples = control.runMode == FIXED_SAMPLES ? fit->currentNumSamples : 1;
+    size_t numTestObservations = static_cast<size_t>(dims[0]);
+    
+    
+    double* testOffset = NULL;
+    if (!Rf_isNull(offset_testExpr)) {
+      if (!Rf_isReal(offset_testExpr)) Rf_error("offset.test must be of type real");
+      if (rc_getLength(offset_testExpr) != 1 || !ISNA(REAL(offset_testExpr)[0])) {
+        if (rc_getLength(offset_testExpr) != numTestObservations) Rf_error("length of offset.test must equal number of rows in x.test");
+        testOffset = REAL(offset_testExpr);
+      }
+    }
+    
+    SEXP result = PROTECT(Rf_allocVector(REALSXP, numTestObservations * numSamples * control.numChains));
+    if (fit->control.numChains <= 1)
+      rc_setDims(result, static_cast<int>(numTestObservations), static_cast<int>(numSamples), -1);
+    else
+      rc_setDims(result, static_cast<int>(numTestObservations), static_cast<int>(numSamples), static_cast<int>(control.numChains), -1);
+    
+    fit->predict(REAL(x_testExpr), numTestObservations, testOffset, REAL(result));
+    
+    UNPROTECT(1);
+    
+    return result;
   }
   
   SEXP setResponse(SEXP fitExpr, SEXP y)
@@ -474,11 +539,7 @@ extern "C" {
     BARTFit* fit = static_cast<BARTFit*>(R_ExternalPtrAddr(fitExpr));
     if (fit == NULL) Rf_error("dbarts_createState called on NULL external pointer");
     
-    SEXP result = createStateExpressionFromFit(*fit);
-    
-    UNPROTECT(1);
-    
-    return result;
+    return createStateExpressionFromFit(*fit);
   }
   
   SEXP restoreState(SEXP fitExpr, SEXP stateExpr)
@@ -502,36 +563,50 @@ extern "C" {
   }
   
   
-  SEXP printTrees(SEXP fitExpr, SEXP treeIndicesExpr)
+  SEXP printTrees(SEXP fitExpr, SEXP chainIndicesExpr, SEXP sampleIndicesExpr, SEXP treeIndicesExpr)
   {
     BARTFit* fit = static_cast<BARTFit*>(R_ExternalPtrAddr(fitExpr));
     if (fit == NULL) Rf_error("dbarts_printTrees called on NULL external pointer");
     
-    size_t numTrees = fit->control.numTrees;
-    size_t* treeIndices;
+    size_t numChains  = fit->control.numChains;
+    size_t numSamples = fit->control.runMode == FIXED_SAMPLES ? fit->currentNumSamples : 1;
+    size_t numTrees  = fit->control.numTrees;
     
-    if (Rf_isNull(treeIndicesExpr)) {
-      treeIndices = ext_stackAllocate(fit->control.numTrees, size_t);
-      for (size_t i = 0; i < numTrees; ++i) treeIndices[i] = i;
-      
-      fit->printTrees(treeIndices, fit->control.numTrees);
-      
-      ext_stackFree(treeIndices);
-      return R_NilValue;
+    size_t numChainIndices  = Rf_isNull(chainIndicesExpr)  ? numChains  : rc_getLength(chainIndicesExpr);
+    size_t numSampleIndices = Rf_isNull(sampleIndicesExpr) ? numSamples : rc_getLength(sampleIndicesExpr);
+    size_t numTreeIndices   = Rf_isNull(treeIndicesExpr)   ? numTrees   : rc_getLength(treeIndicesExpr);
+    
+    
+    size_t* chainIndices  = ext_stackAllocate(numChainIndices, size_t);
+    size_t* sampleIndices = new size_t[numSamples];
+    size_t* treeIndices   = new size_t[numTreeIndices];
+    
+    if (Rf_isNull(chainIndicesExpr)) {
+      for (size_t i = 0; i < numChains; ++i) chainIndices[i] = i;
+    } else {
+      int* i_chainIndices = INTEGER(chainIndicesExpr);
+      for (size_t i = 0; i < numChainIndices; ++i) chainIndices[i] = static_cast<size_t>(i_chainIndices[i] - 1);
     }
     
-    if (rc_getLength(treeIndicesExpr) == 0) return R_NilValue;
+    if (Rf_isNull(sampleIndicesExpr)) {
+      for (size_t i = 0; i < numSamples; ++i) sampleIndices[i] = i;
+    } else {
+      int* i_sampleIndices = INTEGER(sampleIndicesExpr);
+      for (size_t i = 0; i < numSampleIndices; ++i) sampleIndices[i] = static_cast<size_t>(i_sampleIndices[i] - 1);
+    }
     
-    rc_assertIntConstraints(treeIndicesExpr, "tree indices", RC_VALUE | RC_GT, asRXLen(0), RC_VALUE | RC_LEQ, asRXLen(numTrees), RC_END);
+    if (Rf_isNull(treeIndicesExpr)) {
+      for (size_t i = 0; i < numTrees; ++i) treeIndices[i] = i;
+    } else {
+      int* i_treeIndices = INTEGER(treeIndicesExpr);
+      for (size_t i = 0; i < numTreeIndices; ++i) treeIndices[i] = static_cast<size_t>(i_treeIndices[i] - 1);
+    }
+   
+    fit->printTrees(chainIndices, numChainIndices, sampleIndices, numSampleIndices, treeIndices, numTreeIndices);
     
-    size_t numIndices = rc_getLength(treeIndicesExpr);
-    treeIndices = ext_stackAllocate(numIndices, size_t);
-    int* i_treeIndices = INTEGER(treeIndicesExpr);
-    for (size_t i = 0; i < numIndices; ++i) treeIndices[i] = static_cast<size_t>(i_treeIndices[i] - 1);
-    
-    fit->printTrees(treeIndices, numIndices);
-    
-    ext_stackFree(treeIndices);
+    delete [] treeIndices;
+    delete [] sampleIndices;
+    ext_stackFree(chainIndices);
     
     return R_NilValue;
   }
@@ -557,6 +632,8 @@ extern "C" {
     delete fit->model.treePrior;
     
     delete fit;
+    
+    /* TODO: turn into an R object */
     
     return R_NilValue;
   }

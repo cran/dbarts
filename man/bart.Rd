@@ -1,6 +1,8 @@
 \name{bart}
 \alias{bart}
+\alias{bart2}
 \alias{plot.bart}
+\alias{predict.bart}
 \title{Bayesian Additive Regression Trees}
 \description{
 BART is a Bayesian \dQuote{sum-of-trees} model in which each tree is constrained by a prior to be a weak learner.
@@ -22,11 +24,27 @@ bart(x.train, y.train, x.test = matrix(0.0, 0, 0),
      ndpost = 1000, nskip = 100,
      printevery = 100, keepevery = 1, keeptrainfits = TRUE,
      usequants = FALSE, numcut = 100, printcutoffs = 0,
-     verbose = TRUE, nthread = 1, keepcall = TRUE)
+     verbose = TRUE, nchain = 1, nthread = 1, combinechains = TRUE,
+     keeptrees = FALSE, keepcall = TRUE)
+
+bart2(formula, data, test, subset, weights, offset, offset.test = offset,
+      sigest = NA_real_, sigdf = 3.0, sigquant = 0.90,
+      k = 2.0,
+      power = 2.0, base = 0.95,
+      n.trees = 75L,
+      n.samples = 500L, n.burn = 500L,
+      n.chains = 4L, n.threads = min(guessNumCores(), n.chains), combineChains = FALSE,
+      n.cuts = 100L, useQuantiles = FALSE,
+      n.thin = 1L, keepTrainingFits = TRUE,
+      printEvery = 100L, printCutoffs = 0L,
+      verbose = TRUE,
+      keepTrees = TRUE, keepCall = TRUE, \dots)
      
 \method{plot}{bart}(x,
      plquants = c(0.05, 0.95), cols = c('blue', 'black'),
      \dots)
+
+\method{predict}{bart}(object, test, offset.test, combineChains, \dots)
 }
 \arguments{
    \item{x.train}{
@@ -140,16 +158,69 @@ bart(x.train, y.train, x.test = matrix(0.0, 0, 0),
      Logical; if \code{FALSE} supress printing.
    }
    
+   \item{nchain}{
+   	  Integer specifying how many independent tree sets and fits should be calculated.
+   }
+   
    \item{nthread}{
-   	  Integer specifying how many threads to use for rudimentary calculations such as means/variances. Depending
-   	  on the CPU architecture, using more than one can degrade performance for small/medium data sets. As such
+   	  Integer specifying how many threads to use. Depending on the CPU architecture, using more than the
+          number of chains can degrade performance for small/medium data sets. As such
    	  some calculations may be executed single threaded regardless.
    }
    
+   \item{combinechains}{
+     Logical; if \code{TRUE}, samples will be returned in arrays of dimensions equal to \code{nchain} \eqn{\times}
+     \code{ndpost} \eqn{\times} number of observations.
+   }
+   
+   \item{keeptrees}{
+     Logical; must be \code{TRUE} in order to use \code{predict} with the result of a \code{bart} fit.
+   }
    \item{keepcall}{
      Logical; if \code{FALSE}, returned object will have \code{call} set to \code{call("NULL")}, otherwise the call
           used to instantiate BART.
    }
+   
+   \item{formula}{
+     The same as \code{x.train}, the name reflecting that a formula object can be used instead.
+   }
+   
+   \item{data}{
+     The same as \code{y.train}, the name reflecting that a data frame can be specified when a formula is given instead.
+   }
+   
+   \item{test}{
+     The same as \code{x.train}. Can be missing.
+   }
+   \item{subset}{
+     A vector of logicals or indicies used to subset of the data. Can be missing.
+   }
+   \item{offset}{
+     The same as \code{binaryOffset}. Can be missing.
+   }
+   \item{offset.test}{
+     A vector of offsets to be used with test data, in case it is different than the training offset.
+     If \code{offest} is missing, defaults to \code{NULL}.
+   }
+   
+   \item{object}{
+     An object of class \code{bart}, returned from either the function \code{bart} or \code{bart2}.
+   }
+   
+   \item{n.trees}{Same as \code{ntree}.}
+   \item{n.samples}{Same as \code{ndpost}.}
+   \item{n.burn}{Same as \code{nskip}.}
+   \item{n.chains}{Same as \code{nchain}.}
+   \item{n.threads}{Same as \code{nthread}.}
+   \item{combineChains}{Same as \code{combinechains}.}
+   \item{n.cuts}{Same as \code{numcut}.}
+   \item{n.thin}{Same as \code{keepevery}.}
+   \item{keepTrainingFits}{Same as \code{keeptrainfits}.}
+   \item{useQuantiles}{Same as \code{usequants}.}
+   \item{printEvery}{Same as \code{printevery}.}
+   \item{printCutoffs}{Same as \code{printcutoffs}.}
+   \item{keepTrees}{Same as \code{keeptrees}.}
+   \item{keepCall}{Same as \code{keepcall}.}
 
    \item{x}{
      Object of class \code{bart}, returned by function \code{bart}, which contains the information to be plotted.
@@ -167,7 +238,8 @@ bart(x.train, y.train, x.test = matrix(0.0, 0, 0),
    }
 
    \item{\dots}{
-     Additional arguments passed on to plot.
+     Additional arguments passed on to \code{plot} or \code{dbartsControl}, respectively. Not used in
+     \code{predict}.
    }
 }
 \details{
@@ -199,6 +271,12 @@ bart(x.train, y.train, x.test = matrix(0.0, 0, 0),
     the minimum of \code{numcut} and one less than the number
     of unique elements for that variable are used.
   }
+  
+  \subsection{Predict}{
+    Using \code{predict} with a \code{bart} object requires that it be fitted with the
+    option \code{keeptrees}/\code{keepTrees} as \code{TRUE}. Keeping the trees for
+    a fit can require a sizeable amount of memory.
+  }
 }
 \value{
   \code{bart} returns a list assigned class \code{bart}. For applicable
@@ -206,17 +284,20 @@ bart(x.train, y.train, x.test = matrix(0.0, 0, 0),
   In the numeric \eqn{y} case, the list has components:
 
   \item{\code{yhat.train}}{
-        A matrix of posterior samples. The \eqn{(i, j)} value is \eqn{f^*(x_j)}{f*(x_j)}
-        for the \eqn{i}th kept draw of of the posterior of \eqn{f}
-        and the \eqn{j}th row of \code{x.train}.}
+        A array/matrix of posterior samples. The \eqn{(i, j, k)} value is \eqn{f^*(x_k)}{f*(x_k)}
+        for the \eqn{j}th kept draw of of the posterior of \eqn{f}
+        and the \eqn{j}th row of \code{x.train} corresponding to chain \eqn{i}. When \code{nchain}
+        is one, the result is a collapsed down to a matrix.}
   \item{\code{yhat.test}}{
       Same as \code{yhat.train} but now the \eqn{x}s are the rows of the test data.}
   \item{\code{yhat.train.mean}}{
-        Mean of \code{yhat.train} columns.}
+        Vector of means of \code{yhat.train} across columns and chains, with length equal to the number of
+        training observations.}
   \item{\code{yhat.test.mean}}{
-        Mean of \code{yhat.test} columns.}
+        Vector of means of \code{yhat.test} across columns and chains.}
   \item{\code{sigma}}{
-        Posterior samples of \code{sigma}, the residual/error standard deviation.}
+        Matrix of posterior samples of \code{sigma}, the residual/error standard deviation. Dimensions
+        are equal to the number of chains times the numbers of samples unless \code{nchain} is one.}
   \item{\code{first.sigma}}{
         Burn-in draws of \code{sigma}.}
   \item{\code{varcount}}{
@@ -228,6 +309,9 @@ bart(x.train, y.train, x.test = matrix(0.0, 0, 0),
   \item{\code{y}}{
         The input dependent vector of values for the dependent variable.
         This is used in \code{plot.bart}.}
+  \item{\code{fit}}{
+        Optional sampler object which stores the values of the tree splits. Required for using
+        \code{predict}.}
     
   In the binary \eqn{y} case, the returned list has the components
   \code{yhat.train}, \code{yhat.test}, and \code{varcount} as above.  In addition the list 

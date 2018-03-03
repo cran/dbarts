@@ -276,7 +276,9 @@ namespace {
   static R_CallMethodDef R_callMethods[] = {
     DEF_FUNC("dbarts_create", create, 3),
     DEF_FUNC("dbarts_run", run, 3),
-    DEF_FUNC("dbarts_printTrees", printTrees, 2),
+    DEF_FUNC("dbarts_sampleTreesFromPrior", sampleTreesFromPrior, 1),
+    DEF_FUNC("dbarts_printTrees", printTrees, 4),
+    DEF_FUNC("dbarts_predict", predict, 3),
     DEF_FUNC("dbarts_setResponse", setResponse, 2),
     DEF_FUNC("dbarts_setOffset", setOffset, 2),
     DEF_FUNC("dbarts_setPredictor", setPredictor, 2),
@@ -340,8 +342,11 @@ namespace {
     DEF_FUNC("destroyFit", dbarts_destroyFit),
     DEF_FUNC("invalidateFit", dbarts_invalidateFit),
     
+    DEF_FUNC("setRNGState", dbarts_setRNGState),
+    
     DEF_FUNC("runSampler", dbarts_runSampler),
     DEF_FUNC("runSamplerForIterations", dbarts_runSamplerForIterations),
+    DEF_FUNC("sampleTreesFromPrior", dbarts_sampleTreesFromPrior),
     DEF_FUNC("setResponse", dbarts_setResponse),
     DEF_FUNC("setOffset", dbarts_setOffset),
     DEF_FUNC("setPredictor", dbarts_setPredictor),

@@ -12,14 +12,50 @@ coerceOrError <- function(x, type)
 }
 
 "%not_in%" <- function(x, table) match(x, table, nomatch = 0L) <= 0L
+
+evalx.recurse <- function(x, e) {
+  if (length(e) == 0L || typeof(e) == "symbol") return(e)
   
-prepareCallWithArguments <- function(call, name, ...)
+  for (i in seq_along(e)) {
+    if (!is.language(e[[i]])) next
+    
+    e[[i]] <- if (e[[i]] == "x") x else evalx.recurse(x, e[[i]])
+  }
+  
+  e
+}
+
+## evaluates the expression 'e' by after first replacing all instances of 'x' with the expression x
+#x <- NULL
+evalx <- function(x, e) {
+  mc <- match.call()
+  callingEnv <- parent.frame()
+  
+  e <- evalx.recurse(mc$x, mc$e)
+  eval(e, callingEnv)
+}
+
+redirectCall <- function(call, fn, ...)
 {
-  argsToKeep <- unlist(list(...))
-  matchIndices <- match(argsToKeep, names(call), nomatch = 0L)
+  matchedCall <- match.call()
+  extraArgs <- if (length(matchedCall) > 3L) as.character(matchedCall[-c(1L, 2L, 3L)]) else character()
   
-  call <- call[c(1L, matchIndices)]
-  call[[1L]] <- name
+  originalFn <- eval(call[[1L]])
+  call[[1L]] <- if (is.function(fn)) matchedCall[[3L]] else fn
+  if (length(extraArgs) == 0L) {
+    fn <- if (is.function(fn)) fn else eval(fn)
+    
+    argsToKeep <- names(call)[-1L] %in% names(formals(fn))
+    if (any(names(formals(originalFn)) == "...") && any(names(formals(fn)) == "..."))
+      argsToKeep <- argsToKeep | names(call)[-1L] %not_in% names(formals(originalFn))
+    
+    call <- call[c(TRUE, argsToKeep)]
+  } else {
+    matchIndices <- match(extraArgs, names(call), nomatch = 0L)
+    
+    call <- call[c(1L, matchIndices)]
+  }
+  
   call
 }
 

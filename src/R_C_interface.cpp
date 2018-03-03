@@ -26,6 +26,9 @@ extern "C" {
     fit->~BARTFit();
   }
   
+  void dbarts_setRNGState(BARTFit* fit, const void* const* uniformState, const void* const* normalState) {
+    fit->setRNGState(uniformState, normalState);
+  }
   
   Results* dbarts_runSampler(BARTFit* fit) {
     return fit->runSampler();
@@ -33,6 +36,10 @@ extern "C" {
   
   Results* dbarts_runSamplerForIterations(BARTFit* fit, size_t numBurnIn, size_t numSamples) {
     return fit->runSampler(numBurnIn, numSamples);
+  }
+  
+  void dbarts_sampleTreesFromPrior(BARTFit* fit) {
+    fit->sampleTreesFromPrior();
   }
   
   void dbarts_setResponse(BARTFit* fit, const double* newResponse) {

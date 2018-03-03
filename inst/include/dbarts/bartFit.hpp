@@ -14,27 +14,40 @@
 #include "scratch.hpp"
 #include "state.hpp"
 
+extern "C" {
+  struct _ext_htm_manager_t;
+  typedef struct _ext_htm_manager_t* ext_htm_manager_t;
+}
+
 namespace dbarts {
   struct Results;
+  struct SharedScratch;
   
   struct BARTFit {
     Control control; // top three are passed in from elsewhere
     Model model;
     Data data;
     
-    Scratch scratch;
-    State state;
+    SharedScratch sharedScratch;
+    ChainScratch* chainScratch;
+    State* state;
     
-    ext_mt_manager_t threadManager;
+    double runningTime;
+    std::size_t currentNumSamples;
+    
+    ext_htm_manager_t threadManager;
     
     BARTFit(Control control, Model model, Data data);
     ~BARTFit();
+    
+    void setRNGState(const void* const* uniformState, const void* const* normalState);
     
     Results* runSampler();
     Results* runSampler(std::size_t numBurnIn, std::size_t numSamples);
     void runSampler(std::size_t numBurnIn, Results* results);
     
     
+    void predict(const double* x_test, std::size_t numTestObservations, const double* testOffset, double* result) const;
     // settors simply replace local pointers to variables. dimensions much match
     // update modifies the local copy (which may belong to someone else)
     void setResponse(const double* newResponse); 
@@ -53,12 +66,19 @@ namespace dbarts {
     void updateTestPredictor(const double* newTestPredictor, std::size_t column);
     void updateTestPredictors(const double* newTestPredictor, const std::size_t* columns, std::size_t numColumns);
     
-    void printTrees(const std::size_t* indices, std::size_t numIndices) const;
+    void sampleTreesFromPrior();
+    
+    void rebuildScratchFromState();
+    
+    void printTrees(const std::size_t* chains, std::size_t numChains,
+                    const std::size_t* samples, std::size_t numSamples,
+                    const std::size_t* indices, std::size_t numIndices) const;
     
     // this assumes that the new data has as many predictors as the old, and that they correspond to each other;
     // it'll attempt to map cut points from the old to the new, and prune any trees that may have been left in an
     // invalid state
     void setData(const Data& data);
+    // the new control must have the same number of chains as the previous or else prob seg fault
     void setControl(const Control& control);
     void setModel(const Model& model);
     

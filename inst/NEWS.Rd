@@ -1,12 +1,21 @@
 \name{NEWS}
 \title{dbarts News}
 \encoding{UTF-8}
+\section{CHANGES IN VERSION 0.9-2}{
+  \subsection{NEW FEATURES}{
+    \itemize{
+      \item \code{rbart_vi} fits a simple varying intercept, random effects model.
+    }
+  }
+}
 \section{CHANGES IN VERSION 0.9-0}{
   \subsection{NEW FEATURES}{
     \itemize{
       \item Now natively supports multiple chains running in parallel.
       \item Objects fit by \code{bart} can be used with the predict generic
       when instructed to save the trees.
+      \item New function \code{bart2} introduced, similar to \code{bart} but with
+      more efficient default parameters.
     }
   }
   \subsection{USER-VISIBLE CHANGES}{

@@ -207,9 +207,9 @@ bart2(formula, data, test, subset, weights, offset, offset.test = offset,
      An object of class \code{bart}, returned from either the function \code{bart} or \code{bart2}.
    }
    
-   \item{n.trees,n.samples,n.burn,n.chains,n.threads,combineChains,n.cuts,
-         n.thin,keepTrainingFits,useQuantiles,printEvery,printCutoffs,
-         keepTrees,keepCall}{
+   \item{n.trees, n.samples, n.burn, n.chains, n.threads, combineChains, n.cuts,
+         n.thin, keepTrainingFits, useQuantiles, printEvery, printCutoffs,
+         keepTrees, keepCall}{
      Same as their counterparts for \code{bart}.
    }
    \item{x}{
@@ -266,6 +266,16 @@ bart2(formula, data, test, subset, weights, offset, offset.test = offset,
     Using \code{predict} with a \code{bart} object requires that it be fitted with the
     option \code{keeptrees}/\code{keepTrees} as \code{TRUE}. Keeping the trees for
     a fit can require a sizeable amount of memory.
+  }
+  
+  \subsection{Saving}{
+    \code{\link{save}}ing and \code{\link{load}}ing fitted BART objects for use with
+    \code{predict} requires that R's serialization mechanism be able to access the
+    underlying trees, in addition to being fit with \code{keeptrees}/\code{keepTrees}
+    as \code{TRUE}. For memory purposes, the trees are not stored as R objects unless
+    specifically requested. To do this, one must \dQuote{touch} the sampler's state
+    object before saving, e.g. for a fitted object \code{bartFit}, execute
+    \code{invisible(bartFit$fit$state)}.
   }
 }
 \value{

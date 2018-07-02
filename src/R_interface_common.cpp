@@ -196,7 +196,6 @@ namespace dbarts {
     model.muPrior = new NormalPrior(control, k);
     
     
-    
     priorExpr = Rf_getAttrib(modelExpr, Rf_install("resid.prior"));
       
     slotExpr = Rf_getAttrib(priorExpr, Rf_install("df"));
@@ -330,6 +329,7 @@ namespace dbarts {
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
       SEXP result_i = PROTECT(R_do_new_object(R_do_MAKE_CLASS("dbartsState")));
       SET_VECTOR_ELT(result, chainNum, result_i);
+      UNPROTECT(1);
       
       slotExpr = rc_allocateInSlot(result_i, treesSym, STRSXP, static_cast<R_xlen_t>(control.numTrees));
     
@@ -359,8 +359,10 @@ namespace dbarts {
         rc_setDims(slotExpr, static_cast<int>(data.numObservations), static_cast<int>(control.numTrees), static_cast<int>(fit.currentNumSamples), -1);
         std::memcpy(REAL(slotExpr), state[chainNum].savedTreeFits, data.numObservations * control.numTrees * fit.currentNumSamples * sizeof(double));
       } else {
-        Rf_setAttrib(result_i, savedTreesSym, R_NilValue);
-        Rf_setAttrib(result_i, savedTreeFitsSym, R_NilValue);
+        rc_allocateInSlot(result_i, savedTreesSym, STRSXP, 0);
+        rc_allocateInSlot(result_i, savedTreeFitsSym, REALSXP, 0);
+        // Rf_setAttrib(result_i, savedTreesSym, R_NilValue);
+        // Rf_setAttrib(result_i, savedTreeFitsSym, R_NilValue);
       }
       
       slotExpr = rc_allocateInSlot(result_i, sigmaSym, REALSXP, 1);
@@ -374,7 +376,7 @@ namespace dbarts {
     slotExpr = rc_allocateInSlot(result, Rf_install("runningTime"), REALSXP, 1);
     REAL(slotExpr)[0] = fit.runningTime;
     
-    UNPROTECT(1 + control.numChains);
+    UNPROTECT(1);
     
     return result;
   }
@@ -444,8 +446,8 @@ namespace dbarts {
           rc_setDims(slotExpr, static_cast<int>(data.numObservations), static_cast<int>(control.numTrees), static_cast<int>(fit.currentNumSamples), -1);
         }
       } else {
-        Rf_setAttrib(stateExpr_i, savedTreesSym, R_NilValue);
-        Rf_setAttrib(stateExpr_i, savedTreeFitsSym, R_NilValue);
+        rc_allocateInSlot(stateExpr_i, savedTreesSym, STRSXP, 0);
+        rc_allocateInSlot(stateExpr_i, savedTreeFitsSym, REALSXP, 0);
       }
       
       slotExpr = Rf_getAttrib(stateExpr_i, treesSym);

@@ -1,4 +1,4 @@
-e9004380c68810b210f5cd43af7efbe7 *DESCRIPTION
+dbd4c2bfbb6a2cf0a7fb36fdabf7ce32 *DESCRIPTION
 1f8d7a25062b4a7eb40f7a1686ea923d *NAMESPACE
 cf08183b592ac769e1918bfb6c11023c *R/A_class.R
 1d4254562543aae070df1706ac996357 *R/bart.R
@@ -18,8 +18,8 @@ fb176cf6d10a2c677fb99f64000d8f86 *R/sliceSample.R
 ed84bce9ddcfe824cb3711c2dfac660a *README.md
 a7577780372b4fb15ee24577cca5499d *TODO
 fd902acf231cfa0016c4295c662bdb25 *cleanup
-fdad13852aeca2cd333bcc7d03ac6540 *configure
-a716fc1efded5c9cf12e151a26a5f526 *configure.ac
+b9e6443b708853e51eb965919fcb8f29 *configure
+2da4cf8e74bea36cedd2c87a47040001 *configure.ac
 c3af46ed793ac771fa3762d361b7dd65 *configure.win
 3b0e42d2a896d65ae74760e93255a20f *inst/CITATION
 96f11628b664585ebf68bdece7d34028 *inst/NEWS.Rd
@@ -60,7 +60,7 @@ c227b73d2941b1a68559ec791ba524c3 *src/R_interface_common.hpp
 31c37f429143c8e01760d28d71135e2f *src/R_interface_sampler.cpp
 bbc6ccc5187bbb15f07f39559cd37fc0 *src/R_interface_sampler.hpp
 1c44de9a3d29f1a6fe9710934434f541 *src/config.hpp.in
-f073c7ef8765a4a841a0286757b1a45d *src/config.hpp.win
+b41a4e1c71a90bf31ad90b0229bb0785 *src/config.hpp.win
 1a50000f64c18ccab4abce72a00195cc *src/crossvalidate.cpp
 b3fa90c9a71196f09261fe091709fa1e *src/crossvalidate.hpp
 4358f06382c8a59286f9e90bcf77af85 *src/dbarts/Makefile
@@ -72,7 +72,7 @@ e1174f4d9a4d8be1f09e136762d5dc3f *src/dbarts/binaryIO.cpp
 033cc241b8c69a34ccd1aaffc4f44d81 *src/dbarts/changeRule.cpp
 833f762bbc2a0ceb77d788bb908c3ae8 *src/dbarts/changeRule.hpp
 d170a4fbca3758e603fc565dfaaf2bd0 *src/dbarts/config.hpp.in
-5a2abeb77d361a813a0e5b5071c14db3 *src/dbarts/config.hpp.win
+c5353c93691566970248273a29f74558 *src/dbarts/config.hpp.win
 f1f14f8a19e173a5a51ba78717cd5ad4 *src/dbarts/functions.cpp
 61bba2fa0dcca5b6d92db760a3d17ee7 *src/dbarts/functions.hpp
 6b7177e8c319eca937d803a5f76c98c9 *src/dbarts/likelihood.cpp
@@ -91,7 +91,7 @@ f3910bd74fb38cd244df3a459d8298e9 *src/external/adaptiveRadixTree.c
 c21b8d3a3183e4dc26c02707d8d218df *src/external/binaryIO.c
 bf95c9b961e64cd0bac8520655d18d1f *src/external/blockingThreadManager.c
 315cfc40c2100589d18d7cae5d335d45 *src/external/config.h.in
-6960922a8fb3441075e625edd5b4b303 *src/external/config.h.win
+4cfe1740bc7f1e10900cf486bb96688c *src/external/config.h.win
 bb35ec0456ab04f8e2e9774c2d4d1443 *src/external/hierarchicalThreadManager.c
 263c98d49f032dfcf07c20ad0cb090f5 *src/external/io.c
 cef3ac4307255935a9a0d886b4ae78c3 *src/external/linearAlgebra.c
@@ -114,7 +114,7 @@ e25729d0021cc9915090d0105ae3c7e1 *src/include/external/linearAlgebra.h
 77b3be172ae54bbbc2d31bec87262037 *src/include/external/random.h
 d519f8a1599fc40f721fed2bc18fd42e *src/include/external/stats.h
 9cd025ae6d1a3876b6c889546e95c9ce *src/include/external/stats_mt.h
-81849e7b04945d6dd7d48b713a653286 *src/include/external/stddef.h
+ad652c57f4093d0f161c2612cbb36a57 *src/include/external/stddef.h
 87a08394022ba0d04ff42e731487a74b *src/include/external/string.h
 93a4cce056d9fde8f49dd145663f8aa9 *src/include/external/thread.h
 e60478351ed72db29d027f9e1b541fb7 *src/include/rc/bounds.h

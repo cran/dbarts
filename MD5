@@ -1,4 +1,4 @@
-7af0b697d61f1037f78bad6dfeaa21bc *DESCRIPTION
+8b9cf8167e7404b37f2e0522aff49700 *DESCRIPTION
 5130cd3ef12fbc39c26ea0f0ae3f13bc *NAMESPACE
 54a2679e6f563d337304d87243b7db78 *R/A_class.R
 643dbcace1ba7afddab2cef337a97a7c *R/bart.R
@@ -18,11 +18,11 @@ b1e75368cc76bf9bc33e5a89ba603374 *R/rbart.R
 ed84bce9ddcfe824cb3711c2dfac660a *README.md
 228f7476a339c0d7968fc8d504da342f *TODO
 fd902acf231cfa0016c4295c662bdb25 *cleanup
-7d501609b4aa87982e59ecf92656caf0 *configure
-587a2cedbcfcb56b98f5455f5fc79d2b *configure.ac
+07b7f1bbfca782ab14538d85c8f916c6 *configure
+7e0c6ae9e60d32bff23dc8781e4bb02c *configure.ac
 c3af46ed793ac771fa3762d361b7dd65 *configure.win
 3b0e42d2a896d65ae74760e93255a20f *inst/CITATION
-91007f2b4c0d41124306e3ac3c7e6591 *inst/NEWS.Rd
+f60935c89315b28decb84e0e6039979c *inst/NEWS.Rd
 354560c49457846df90ac39fa106ed27 *inst/common/almostLinearBinaryData.R
 059f2ac6749b03e4fcea0314876d8807 *inst/common/friedmanData.R
 0461764f736d06ed515288e5b4dc85d0 *inst/common/hillData.R
@@ -47,7 +47,7 @@ da2143ce14895b82875b1b5821ff941f *man/dbartsSampler-class.Rd
 f57eafe6094b78100876f806deb0f689 *man/makeind.Rd
 c631eb2e3830b9c68d347741117561c1 *man/pdbart.Rd
 69f4304b8b7a2b45d57ed7b864097166 *man/rbart.Rd
-29601eec13da1a6075b7b18e2f58d794 *man/xbart.Rd
+88a15602f2d504c835298efc34d1aedc *man/xbart.Rd
 09fcfb04f654fd8b386c021c514f9902 *src/Makevars.in
 726b98f5e31a812b65c2647df31b5d68 *src/Makevars.win
 c20369e22a07baacbe6ff630aadf194a *src/R_C_interface.cpp
@@ -55,12 +55,12 @@ c20369e22a07baacbe6ff630aadf194a *src/R_C_interface.cpp
 3a7648cf45455a0acca3fe0ef9624f5f *src/R_interface.hpp
 9d1ec94b6cebdeb2266544ba3744cc1d *src/R_interface_common.cpp
 c227b73d2941b1a68559ec791ba524c3 *src/R_interface_common.hpp
-36634e3ffcac28270bcc47bca8cc12dd *src/R_interface_crossvalidate.cpp
+e6dfa1ad89b3889112a132c7b590ed46 *src/R_interface_crossvalidate.cpp
 38e46a84bb403a5f61fff67b319f3b73 *src/R_interface_crossvalidate.hpp
 31c37f429143c8e01760d28d71135e2f *src/R_interface_sampler.cpp
 bbc6ccc5187bbb15f07f39559cd37fc0 *src/R_interface_sampler.hpp
-1c44de9a3d29f1a6fe9710934434f541 *src/config.hpp.in
-10a27a1ce972310517c16fed6047c790 *src/config.hpp.win
+9ef0b071691fc86b6c671d4d8e19f8b5 *src/config.hpp.in
+db9f953bb978f8510bf1af2c824608d6 *src/config.hpp.win
 9feb510723c228a8739143396447e210 *src/crossvalidate.cpp
 b3fa90c9a71196f09261fe091709fa1e *src/crossvalidate.hpp
 cb43acdb1a02da8ca940b4f04e120d14 *src/dbarts/Makefile
@@ -72,7 +72,7 @@ e1174f4d9a4d8be1f09e136762d5dc3f *src/dbarts/binaryIO.cpp
 033cc241b8c69a34ccd1aaffc4f44d81 *src/dbarts/changeRule.cpp
 833f762bbc2a0ceb77d788bb908c3ae8 *src/dbarts/changeRule.hpp
 d170a4fbca3758e603fc565dfaaf2bd0 *src/dbarts/config.hpp.in
-e3bc592eb758f5e6bfb1f87b745732ad *src/dbarts/config.hpp.win
+1886517a9b851b84ca063ed404b552ff *src/dbarts/config.hpp.win
 f1f14f8a19e173a5a51ba78717cd5ad4 *src/dbarts/functions.cpp
 61bba2fa0dcca5b6d92db760a3d17ee7 *src/dbarts/functions.hpp
 6b7177e8c319eca937d803a5f76c98c9 *src/dbarts/likelihood.cpp
@@ -91,7 +91,7 @@ f3910bd74fb38cd244df3a459d8298e9 *src/external/adaptiveRadixTree.c
 c21b8d3a3183e4dc26c02707d8d218df *src/external/binaryIO.c
 6213d527b611dcc275138bd08fb15ecf *src/external/blockingThreadManager.c
 315cfc40c2100589d18d7cae5d335d45 *src/external/config.h.in
-f0878d138820bebbb4b5e983b38fdb09 *src/external/config.h.win
+e4e36084015ae6763787f8513949eb2d *src/external/config.h.win
 6baefa66080c14674e060541bfe51299 *src/external/hierarchicalThreadManager.c
 263c98d49f032dfcf07c20ad0cb090f5 *src/external/io.c
 cef3ac4307255935a9a0d886b4ae78c3 *src/external/linearAlgebra.c
@@ -148,5 +148,6 @@ a488a4d16ee95e6ad78081d1918d9a32 *tools/m4/ax_ext.m4
 aa50e2d9af2bbc7c86d4406de8a4ba8e *tools/m4/ax_func_posix_memalign.m4
 508a38e0a018df8dd07a2bd31980f430 *tools/m4/ax_gcc_x86_avx_xgetbv.m4
 ab8de3a5954a15ed48f6998f205f4e26 *tools/m4/ax_gcc_x86_cpuid.m4
+91cb94e058ae1b7f75719f1676e7a994 *tools/m4/ax_log1p_in_namespace_std.m4
 dd11d6ddf98d1e2066fa3aef4f8ce966 *tools/m4/ax_pthread.m4
 77d42f228e00bb32e43a6e31d207399d *tools/m4/ax_snprintf_in_namespace_std.m4

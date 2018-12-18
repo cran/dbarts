@@ -10,8 +10,6 @@
 #include <external/alloca.h>
 #include <external/linearAlgebra.h>
 
-#include <external/Rinternals.h> // SEXP
-
 #include <rc/util.h>
 
 typedef enum {
@@ -44,7 +42,7 @@ SEXP dbarts_makeModelMatrixFromDataFrame(SEXP x, SEXP dropColumnsExpr)
   int errorCode = 0;
   SEXP result = R_NilValue;
   SEXP dropPatternExpr = R_NilValue;
-  size_t protectCount = 0;
+  int protectCount = 0;
   
   size_t numInputColumns = (size_t) rc_getLength(x);
   size_t numOutputColumns = 0;
@@ -289,7 +287,7 @@ void countMatrixColumns(SEXP x, const column_type* columnTypes, SEXP dropPattern
 static int createMatrix(SEXP x, size_t numRows, SEXP resultExpr, const column_type* columnTypes, SEXP dropPatternExpr)
 {
   SEXP names = rc_getNames(x);
-  size_t protectCount = 0;
+  int protectCount = 0;
   if (names != R_NilValue) {
     names = PROTECT(names);
     ++protectCount;

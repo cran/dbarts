@@ -3,7 +3,7 @@ rbart.priors <- list(cauchy = function(x, rel.scale) dcauchy(x, 0, rel.scale * 2
 cauchy <- NULL ## for R CMD check
 
 rbart_vi <- function(
-  formula, data, test, subset, weight, offset, offset.test = offset,
+  formula, data, test, subset, weights, offset, offset.test = offset,
   group.by, prior = cauchy, ## can be a symbol in rbart.priors or a function; on log scale
   sigest = NA_real_, sigdf = 3.0, sigquant = 0.90,
   k = 2.0,
@@ -34,7 +34,10 @@ rbart_vi <- function(
   control@printEvery <- control@printEvery %/% control@n.thin
   control@n.chains <- 1L
   control@n.threads <- max(control@n.threads %/% n.chains, 1L)
-  if (n.chains > 1L && n.threads > 1L) control@verbose <- FALSE
+  if (n.chains > 1L && n.threads > 1L) {
+    if (control@verbose) warning("verbose output disabled for multiple threads")
+    control@verbose <- FALSE
+  }
   
   tree.prior <- quote(cgm(power, base))
   tree.prior[[2L]] <- power; tree.prior[[3L]] <- base
@@ -46,14 +49,17 @@ rbart_vi <- function(
   resid.prior[[2L]] <- sigdf; resid.prior[[3L]] <- sigquant
     
   group.by <- tryCatch(group.by, error = function(e) e)
-  if ((is(group.by, "error") || !(is.numeric(group.by) || is.factor(group.by))) && is.language(formula) && formula[[1L]] == '~') {
+  if ((is(group.by, "error") || !(is.numeric(group.by) || is.factor(group.by) || is.character(group.by))) && is.language(formula) && formula[[1L]] == '~') {
     if (is.symbol(matchedCall$group.by) && any(names(data) == matchedCall$group.by)) {
       group.by <- data[[which(names(data) == matchedCall$group.by)[1L]]]
     } else {
       group.by <- eval(matchedCall$group.by, environment(formula))
     }
   }
-  if (is(group.by, "error") || !(is.numeric(group.by) || is.factor(group.by))) stop("'group.by' not found")
+  if (is(group.by, "error"))
+    stop("'group.by' not found")
+  if (!is.numeric(group.by) && !is.factor(group.by) && !is.character(group.by))
+    stop("'group.by' must be coercible to factor type")
     
   if (is.null(matchedCall$prior)) matchedCall$prior <- formals(rbart_vi)$prior
   
@@ -66,6 +72,7 @@ rbart_vi <- function(
     stop("rbart requires continuous response")
   if (length(group.by) != length(data@y))
     stop("'group.by' not of length equal to that of data")
+  group.by <- droplevels(as.factor(group.by))
   
   samplerArgs <- namedList(formula = data, control, tree.prior, node.prior, resid.prior, sigma = as.numeric(sigest))
 
@@ -101,9 +108,8 @@ rbart_vi_fit <- function(samplerArgs, group.by, prior)
   y <- sampler$data@y
   rel.scale <- sd(y)
   
-  g.fac <- droplevels(as.factor(group.by))
-  g <- as.integer(g.fac)
-  numRanef <- nlevels(g.fac)
+  g <- as.integer(group.by)
+  numRanef <- nlevels(group.by)
   g.sel <- lapply(seq_len(numRanef), function(j) g == j)
   n.g <- sapply(g.sel, sum)
   
@@ -123,6 +129,7 @@ rbart_vi_fit <- function(samplerArgs, group.by, prior)
   ranef <- matrix(NA_real_, numRanef, control@n.samples)
   yhat.train <- matrix(NA_real_, numObservations, control@n.samples)
   yhat.test  <- matrix(NA_real_, numTestObservations, control@n.samples)
+  varcount <- matrix(NA_integer_, ncol(sampler$data@x), control@n.samples)
   
   sampler$sampleTreesFromPrior()
   
@@ -178,6 +185,7 @@ rbart_vi_fit <- function(samplerArgs, group.by, prior)
     .Call(C_dbarts_assignInPlace, sigma, i, samples$sigma[1L])
     .Call(C_dbarts_assignInPlace, ranef, i, ranef.i)
     .Call(C_dbarts_assignInPlace, yhat.train, i, samples$train)
+    .Call(C_dbarts_assignInPlace, varcount, i, samples$varcount)
     if (numTestObservations > 0L) .Call(C_dbarts_assignInPlace, yhat.test, i, samples$test)
     
     if (verbose && i %% control@printEvery == 0L) cat("iter: ", i, "\n", sep = "")
@@ -186,17 +194,17 @@ rbart_vi_fit <- function(samplerArgs, group.by, prior)
   control@updateState <- oldUpdateState
   sampler$setControl(control)
   
-  rownames(ranef) <- levels(g.fac)
+  rownames(ranef) <- levels(group.by)
   
-  namedList(sampler, ranef, firstTau, firstSigma, tau, sigma, yhat.train, yhat.test)
+  namedList(sampler, ranef, firstTau, firstSigma, tau, sigma, yhat.train, yhat.test, varcount)
 }
 
 packageRbartResults <- function(control, data, group.by, chainResults, combineChains)
 {
   n.chains <- length(chainResults)
   
-  result <- list(call = control@call, y = data@y, group.by = levels(droplevels(as.factor(group.by))),
-                 varcount = NULL, sigest = chainResults[[1L]]$sampler$data@sigma)
+  result <- list(call = control@call, y = data@y, group.by = group.by,
+                 sigest = chainResults[[1L]]$sampler$data@sigma)
   if (n.chains > 1L) {
     result$ranef       <- packageSamples(n.chains, combineChains, array(sapply(chainResults, function(x) x$ranef), c(dim(chainResults[[1L]]$ranef), n.chains)))
     result$first.tau   <- packageSamples(n.chains, combineChains, sapply(chainResults, function(x) x$firstTau))
@@ -208,6 +216,7 @@ packageRbartResults <- function(control, data, group.by, chainResults, combineCh
     result$yhat.test   <- if (NROW(chainResults[[1L]]$yhat.test) <= 0L) NULL else
                             packageSamples(n.chains, combineChains,
                                            array(sapply(chainResults, function(x) x$yhat.test), c(dim(chainResults[[1L]]$yhat.test), n.chains)))
+    result$varcount    <- packageSamples(n.chains, combineChains, array(sapply(chainResults, function(x) x$varcount), c(dim(chainResults[[1L]]$varcount), n.chains)))
   } else {
     result$ranef       <- t(chainResults[[1L]]$ranef)
     result$first.tau   <- chainResults[[1L]]$firstTau
@@ -216,6 +225,7 @@ packageRbartResults <- function(control, data, group.by, chainResults, combineCh
     result$tau         <- chainResults[[1L]]$tau
     result$yhat.train  <- t(chainResults[[1L]]$yhat.train)
     result$yhat.test   <- if (NROW(chainResults[[1L]]$yhat.test) <= 0L) NULL else t(chainResults[[1L]]$yhat.test)
+    result$varcount    <- chainResults[[1L]]$varcount
   }
   dimnames(result$ranef) <- if (length(dim(result$ranef)) > 2L) list(NULL, NULL, rownames(chainResults[[1L]]$ranef)) else list(NULL, rownames(chainResults[[1L]]$ranef))
   
@@ -241,9 +251,9 @@ predict.rbart <- function(object, test, group.by, offset.test, combineChains, ..
   if (missing(offset.test)) offset.test <- NULL
   
   if (length(dim(object$ranef)) > 2L)
-    ranef <- aperm(object$ranef[,,match(group.by, object$group.by)], c(3L, 2L, 1L))
+    ranef <- aperm(object$ranef[,,match(group.by, levels(object$group.by))], c(3L, 2L, 1L))
   else
-    ranef <- t(object$ranef[,match(group.by, object$group.by)])
+    ranef <- t(object$ranef[,match(group.by, levels(object$group.by))])
   if (anyNA(ranef)) ranef[is.na(ranef)] <- 0
   
   pred <- lapply(seq_len(n.chains), function(i) object$fit[[i]]$predict(test, offset.test))
@@ -253,7 +263,7 @@ predict.rbart <- function(object, test, group.by, offset.test, combineChains, ..
 }
 
 ## create the contents to be used in partial dependence plots
-pdrbart <- function(x.train, y.train, group.by, xind = seq_len(ncol(x.train)),
+if (FALSE) pdrbart <- function(x.train, y.train, group.by, xind = seq_len(ncol(x.train)),
                     levs = NULL, levquants = c(0.05, seq(0.1, 0.9, 0.1), 0.95),
                     pl = TRUE, plquants = c(0.05, 0.95),
                     ...)
@@ -285,7 +295,11 @@ pdrbart <- function(x.train, y.train, group.by, xind = seq_len(ncol(x.train)),
     fdrtemp = NULL
     for (i in 1:nlevels[j]) {
       cind = cnt + ((i-1)*n+1):(i*n)
-      fdrtemp = cbind(fdrtemp,(apply(pdbrt$yhat.test[,cind],1,mean)))
+      yhat.test <- 
+      fdrtemp <- if (length(dim(pdbrt$yhat.test)) > 2L)
+        cbind(fdrtemp, as.vector(t(apply(pdbrt$yhat.test[,,cind], c(1, 2), mean))))
+      else
+        cbind(fdrtemp, apply(pdbrt$yhat.test[,cind], 1, mean))
     }
     fdr[[j]] = fdrtemp
     cnt = cnt + n*nlevels[j]
@@ -302,12 +316,12 @@ pdrbart <- function(x.train, y.train, group.by, xind = seq_len(ncol(x.train)),
     bartcall=pdbrt$call,yhat.train=pdbrt$yhat.train,
     y=pdbrt$y)
   }
-  class(retval) = 'pdbart'
+  class(retval) = 'pdrbart'
   if (pl) plot(retval, plquants = plquants)
   return (retval)
 }
 
-pd2rbart <- function (
+if (FALSE) pd2rbart <- function (
    x.train, y.train, group.by,
    xind = c(1, 2),
    levs = NULL, levquants = c(0.05, seq(0.1, 0.9, 0.1), 0.95),
@@ -347,7 +361,10 @@ pd2rbart <- function (
     fdr = NULL 
     for (i in 1:nxvals) {
       cind =  ((i-1)*n+1):(i*n)
-      fdr = cbind(fdr,(apply(pdbrt$yhat.test[,cind],1,mean)))
+      fdr <- if (length(dim(pdbrt$yhat.test)) > 2L)
+        cbind(fdr, as.vector(t(apply(pdbrt$yhat.test[,,cind], c(1, 2), mean))))
+      else
+        cbind(fdr, apply(pdbrt$yhat.test[,cind], 1, mean))
     }
   }
   if (is.null(colnames(x.train))) xlbs = paste('x',xind,sep='')
@@ -362,7 +379,7 @@ pd2rbart <- function (
                   bartcall=pdbrt$call,yhat.train=pdbrt$yhat.train,
                   y=pdbrt$y)
   }
-  class(retval) = 'pd2bart'
+  class(retval) = 'pd2rbart'
   if (pl) plot(retval,plquants=plquants)
   return (retval)
 }

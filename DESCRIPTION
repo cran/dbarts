@@ -1,6 +1,6 @@
 Package: dbarts
-Version: 0.9-5
-Date: 2018-07-06
+Version: 0.9-7
+Date: 2018-12-18
 Title: Discrete Bayesian Additive Regression Trees Sampler
 Authors@R: c(person("Vincent", "Dorie",     role = c("aut", "cre"), email = "vdorie@gmail.com"),
              person("Hugh",    "Chipman",   role = "aut",           email = "hugh.chipman@gmail.com"),
@@ -14,10 +14,10 @@ NeedsCompilation: yes
 Biarch: yes
 URL: https://github.com/vdorie/dbarts
 BugReports: https://github.com/vdorie/dbarts/issues
-Packaged: 2018-07-06 16:57:22 UTC; vdorie
+Packaged: 2018-12-18 15:45:21 UTC; vdorie
 Author: Vincent Dorie [aut, cre],
   Hugh Chipman [aut],
   Robert McCulloch [aut]
 Maintainer: Vincent Dorie <vdorie@gmail.com>
 Repository: CRAN
-Date/Publication: 2018-07-07 15:40:17 UTC
+Date/Publication: 2018-12-18 16:40:09 UTC

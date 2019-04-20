@@ -1,16 +1,20 @@
 ## pass -DMATCH_BAYES_TREE to get same results as BayesTree, including excess random calls
 MATCH_BAYES_TREE=
 THREAD_SAFE_UNLOAD=
+SSE2_FLAG=-msse2
+SSE4_1_FLAG=-msse4.1
+AVX_FLAG=-mavx
+AVX2_FLAG=-mavx2
 
 INST_DIR=../inst
 
 PTHREAD_FLAGS=-pthread
 PKG_CPPFLAGS=-I$(INST_DIR)/include -Iinclude
-PKG_LIBS= dbarts.a external.a rc.a $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS) -lpthread 
+PKG_LIBS= dbarts.a external.a misc.a rc.a $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS) -lpthread 
 
 MkInclude = $(R_HOME)/etc${R_ARCH}/Makeconf
 
-SUBDIRS = dbarts external rc
+SUBDIRS = dbarts external misc rc
 SUBLIBS = $(SUBDIRS:=.a)
 
 all: $(SHLIB)
@@ -22,13 +26,15 @@ sublibs: sublibraries
 sublibraries:
 	@for d in $(SUBDIRS); do \
 	  (cd $${d} && $(MAKE) -f "$(MkInclude)" -f Makefile library \
-	   PTHREAD_FLAGS="$(PTHREAD_FLAGS)" INST_DIR="$(INST_DIR)" MATCH_BAYES_TREE="$(MATCH_BAYES_TREE)" \
+	   PTHREAD_FLAGS="$(PTHREAD_FLAGS)" INST_DIR="$(INST_DIR)" DBARTS_FLAGS="$(MATCH_BAYES_TREE)" \
+           SSE2_FLAG="$(SSE2_FLAG)" SSE4_1_FLAG="$(SSE4_1_FLAG)" AVX_FLAG="$(AVX_FLAG)" AVX2_FLAG="$(AVX2_FLAG)" \
            CC="$(CC)" CFLAGS="$(CFLAGS) $(CPICFLAGS)" CXX="$(CXX)" CXXFLAGS="$(CXXFLAGS) $(CXXPICFLAGS)" \
            CPPFLAGS="$(CPPFLAGS)" AR="$(AR)" ARFLAGS="$(ARFLAGS)") \
            || exit 1; \
 	done
 
 clean: subclean
+	-rm -f ../inst/include/dbarts/types.hpp src/include/misc/types.h config.hpp
 	@-rm -rf .libs _libs
 	@-rm -f *.o $(SHLIB)
 

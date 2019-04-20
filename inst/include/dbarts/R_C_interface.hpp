@@ -11,6 +11,7 @@ namespace dbarts {
   struct CGMPrior;
   struct NormalPrior;
   struct ChiSquaredPrior;
+  struct ChiHyperprior;
   
   struct BARTFit;
   struct Results;
@@ -29,16 +30,20 @@ extern "C" {
   dbarts::Results* dbarts_runSamplerForIterations(dbarts::BARTFit* fit, std::size_t numBurnIn, std::size_t numSamples);
   void dbarts_sampleTreesFromPrior(dbarts::BARTFit* fit);
   
-  // settors simply replace local pointers to variables. dimensions much match
-  // update modifies the local copy (which may belong to someone else)
+  // 'settors' simply replace local pointers to variables. dimensions much match
+  // 'update' modifies the local copy (which may belong to someone else)
   void dbarts_setResponse(dbarts::BARTFit* fit, const double* newResponse);
   void dbarts_setOffset(dbarts::BARTFit* fit, const double* newOffset);
   
-  // predictor changes will return false if the new covariates would leave the sampler in an invalid state
-  // (i.e. with an empty terminal node); the update functions auto-revert to the previous while set does not
-  int dbarts_setPredictor(dbarts::BARTFit* fit, const double* newPredictor); // != 0 if update leaves sampler in invalid state; set with a valid one to proceed
-  int dbarts_updatePredictor(dbarts::BARTFit* fit, const double* newPredictor, std::size_t column); // false if same, but reverts on own
-  int dbarts_updatePredictors(dbarts::BARTFit* fit, const double* newPredictor, const std::size_t* columns, std::size_t numColumns);
+  // forceUpdate == true will cause the sampler to go through with the change even if it
+  //   would leave the sampler in an invalid state, i.e. with a leaf having no observations;
+  //   in that case, the empty leaf will be pruned;
+  // forceUpdate == false rolls back invalid changes and can be used for rejection sampling
+  // updateCutPoints == true takes the new predictor and uses the default rule to create
+  //   a new set of cut points from it, and rebalances observations in nodes as necessary
+  int dbarts_setPredictor(dbarts::BARTFit* fit, const double* newPredictor, int forceUpdate, int updateCutPoints);
+  int dbarts_updatePredictor(dbarts::BARTFit* fit, const double* newPredictor, std::size_t column, int forceUpdate, int updateCutPoints);
+  int dbarts_updatePredictors(dbarts::BARTFit* fit, const double* newPredictor, const std::size_t* columns, std::size_t numColumns, int forceUpdate, int updateCutPoints);
   
   void dbarts_setTestPredictor(dbarts::BARTFit* fit, const double* newTestPredictor, std::size_t numTestObservations);
   void dbarts_setTestOffset(dbarts::BARTFit* fit, const double* newTestOffset);
@@ -54,10 +59,16 @@ extern "C" {
   void dbarts_invalidateCGMPrior(dbarts::CGMPrior* prior);
   
   dbarts::NormalPrior* dbarts_createNormalPrior();
-  dbarts::NormalPrior* dbarts_createNormalPriorFromOptions(const dbarts::Control* control, double k);
+  dbarts::NormalPrior* dbarts_createNormalPriorFromOptions(const dbarts::Control* control, const dbarts::Model* model, double k);
   void dbarts_destroyNormalPrior(dbarts::NormalPrior* prior);
-  void dbarts_initializeNormalPriorFromOptions(dbarts::NormalPrior* prior, const dbarts::Control* control, double k);
+  void dbarts_initializeNormalPriorFromOptions(dbarts::NormalPrior* prior, const dbarts::Control* control, const dbarts::Model* model, double k);
   void dbarts_invalidateNormalPrior(dbarts::NormalPrior* prior);
+  
+  dbarts::ChiHyperprior* dbarts_createChiHyperprior();
+  dbarts::ChiHyperprior* dbarts_createChiHyperpriorFromOptions(double degreesOfFreedom, double scale);
+  void dbarts_destroyChiHyperprior(dbarts::ChiHyperprior* prior);
+  void dbarts_initializeChiHyperpriorFromOptions(dbarts::ChiHyperprior* prior, double degreesOfFreedom, double scale);
+  void dbarts_invalidateChiHyperprior(dbarts::ChiHyperprior* prior);
   
   dbarts::ChiSquaredPrior* dbarts_createChiSquaredPrior();
   dbarts::ChiSquaredPrior* dbarts_createChiSquaredPriorFromOptions(double degreesOfFreedom, double quantile);

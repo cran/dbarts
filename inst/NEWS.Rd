@@ -1,6 +1,57 @@
 \name{NEWS}
 \title{dbarts News}
 \encoding{UTF-8}
+\section{CHANGES IN VERSION 0.9-10}{
+  \subsection{NEW FEATURES}{
+    \itemize{
+      \item A hyperpriors for \code{k} has now been implemented. Passing
+            \code{k = chi(degreesOfFreedom, scale)} now penalizes small values of
+            \code{k}, encouraging more shrinkage.
+    }
+  }
+  \subsection{USER-VISIBLE CHANGES}{
+    \itemize{
+      \item Hyperprior of \code{chi(1.25, Inf)} is now default for \code{bart2}
+            with binary outcomes. The default accuracy should improve substantially
+    }
+  }
+  \subsection{BUG-FIXES}{
+    \itemize{
+      \item \code{xbart} divides data correctly with random subsampling.
+    }
+  }
+}
+\section{CHANGES IN VERSION 0.9-9}{
+  \subsection{NEW FEATURES}{
+    \itemize{
+      \item More control over cut points has been added. It is now possible to specify
+            the cut points for a variable once and subsequently change that predictor
+            without also modifying the cuts using \code{sampler$setCutPoints} and
+            \code{sampler$setPredictor}.
+      \item \code{sampler$getTrees} implemented to get a flattened, depth-first down
+            left traversal of the trees.
+    }
+  }
+  \subsection{USER-VISIBLE CHANGES}{
+    \itemize{
+      \item For \code{sampler$setPredictor}, an argument specifies whether or not to
+            rollback or force the change if the new data would result in a leaf
+            having 0 observations.
+      \item \code{pdbart} and \code{pd2bart} now work with formula/data specifications,
+            as well as taking models or samplers that have previously stored trees.
+    }
+  }
+  \subsection{OPTIMIZATIONS}{
+    \itemize{
+      \item Stores \code{x} as integer matrix of the max of which cut point an observation is
+            to the left of, by default using 16 bit integers. Limited to 65535 cut points.
+            That can be increased with some special compilation instructions.
+      \item Uses CPU dispatch and SIMD instructions for some operations. This and the integer
+            \code{x} make BART about 30\% faster on datasets of around 10k observations.
+      \item Saved trees are stored using significantly less memory.
+    }
+  }
+}
 \section{CHANGES IN VERSION 0.9-8}{
   \subsection{NEW FEATURES}{
     \itemize{

@@ -9,7 +9,7 @@ xbart(formula, data, subset, weights, offset, verbose = FALSE, n.samples = 200L,
       method = c("k-fold", "random subsample"), n.test = c(5, 0.2),
       n.reps = 40L, n.burn = c(200L, 150L, 50L),
       loss = c("rmse", "log", "mcr"), n.threads = guessNumCores(), n.trees = 75L,
-      k = 2, power = 2, base = 0.95, drop = TRUE,
+      k = NULL, power = 2, base = 0.95, drop = TRUE,
       resid.prior = chisq, control = dbartsControl(), sigma = NA_real_)}
 \arguments{
   \item{formula}{
@@ -63,7 +63,7 @@ xbart(formula, data, subset, weights, offset, verbose = FALSE, n.samples = 200L,
     parameter is also the burn in when moving between folds in \code{"k-fold"} crossvalidation.
   }
   \item{loss}{
-    Either a one of the present loss functions as character-strings (\code{mcr} - missclassification rate for
+    Either a one of the pre-set loss functions as character-strings (\code{mcr} - missclassification rate for
     binary responses, \code{rmse} - root-mean-squared-error for continuous response), \code{log} - negative 
     log-loss for binary response (\code{rmse} serves this purpose for continuous responses), a function, or
     a function- evaluation environment list-pair. Functions should have prototypes of the form
@@ -83,7 +83,8 @@ xbart(formula, data, subset, weights, offset, verbose = FALSE, n.samples = 200L,
    }
    \item{k}{
      A vector of positive real numbers, setting the BART hyperparameter for the node-mean prior standard
-     deviation.
+     deviation. If \code{NULL}, the default of \code{bart2} will be used - 2 for continuous response and
+     a Chi hyperprior for binary. Hyperprior crossvalidation not possible at this time.
    }
    \item{power}{
      A vector of real numbers greater than one, setting the BART hyperparameter for the tree prior's growth

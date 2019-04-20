@@ -1,14 +1,19 @@
+#ifdef __MINGW32__
+#  define __USE_MINGW_ANSI_STDIO 1
+#else
+#endif
+
 #include "makeModelMatrixFromDataFrame.h"
 
 #include <errno.h>
 #include <stdbool.h>
+#include <stdio.h> // snprintf
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
-
-#include <external/alloca.h>
-#include <external/linearAlgebra.h>
+#include <misc/alloca.h>
+#include <misc/linearAlgebra.h>
 
 #include <rc/util.h>
 
@@ -72,7 +77,7 @@ SEXP dbarts_makeModelMatrixFromDataFrame(SEXP x, SEXP dropColumnsExpr)
     goto mkmm_cleanup;
   }
   
-  result = PROTECT(rc_newNumeric(numRows * numOutputColumns));
+  result = PROTECT(rc_newReal(numRows * numOutputColumns));
   ++protectCount;
   rc_setDims(result, (int) numRows, (int) numOutputColumns, -1);
   
@@ -149,7 +154,7 @@ static void tableFactor(SEXP x, int* instanceCounts)
 static bool numericVectorIsConstant(SEXP x, column_type t) {
   switch (t) {
     case REAL_VECTOR:
-    return ext_vectorIsConstant(REAL(x), (size_t) rc_getLength(x));
+    return misc_vectorIsConstant(REAL(x), (size_t) rc_getLength(x));
     case INTEGER_VECTOR:
     case LOGICAL_VECTOR:
     return integerVectorIsConstant(INTEGER(x), (size_t) rc_getLength(x));
@@ -209,7 +214,7 @@ void countMatrixColumns(SEXP x, const column_type* columnTypes, SEXP dropPattern
             int* dropPattern = LOGICAL(VECTOR_ELT(dropPatternExpr, i));
             
             for (size_t j = 0; j < numCols; ++j) {
-              dropColumn = ext_vectorIsConstant(colData + j * numRows, numRows);
+              dropColumn = misc_vectorIsConstant(colData + j * numRows, numRows);
               dropPattern[j] = dropColumn;
               if (!dropColumn) *result += 1;
             }
@@ -336,7 +341,7 @@ static int createMatrix(SEXP x, size_t numRows, SEXP resultExpr, const column_ty
               free(colName);
             } else if (names != R_NilValue) {
               char buffer[16];
-              snprintf(buffer, 16, "%lu", j + 1);
+              snprintf(buffer, 16, "%zu", j + 1);
               char* colName = concatenateStrings(CHAR(STRING_ELT(names, i)), buffer);
               SET_STRING_ELT(resultNames, resultCol, Rf_mkChar(colName));
               free(colName);
@@ -366,7 +371,7 @@ static int createMatrix(SEXP x, size_t numRows, SEXP resultExpr, const column_ty
               free(colName);
             } else if (names != R_NilValue) {
               char buffer[16];
-              snprintf(buffer, 16, "%lu", j + 1);
+              snprintf(buffer, 16, "%zu", j + 1);
               char* colName = concatenateStrings(CHAR(STRING_ELT(names, i)), buffer);
               SET_STRING_ELT(resultNames, resultCol, Rf_mkChar(colName));
               free(colName);

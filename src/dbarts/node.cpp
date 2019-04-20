@@ -4,11 +4,11 @@
 #include <cstring>    // memcpy
 #include <algorithm>  // int max
 
-#include <external/alloca.h>
+#include <misc/alloca.h>
 #include <external/io.h>
-#include <external/linearAlgebra.h>
-#include <external/stats.h>
-#include <external/stats_mt.h>
+#include <misc/linearAlgebra.h>
+#include <misc/stats.h>
+#include <misc/partition.h>
 
 #include <dbarts/bartFit.hpp>
 #include <dbarts/data.hpp>
@@ -26,7 +26,7 @@ namespace dbarts {
     if (variableIndex < 0) return -1000.0;
     if (fit.data.variableTypes[variableIndex] != ORDINAL) return -2000.0;
     
-    return fit.sharedScratch.cutPoints[variableIndex][splitIndex];
+    return fit.cutPoints[variableIndex][splitIndex];
   }
   
   void Rule::invalidate() {
@@ -34,18 +34,17 @@ namespace dbarts {
     splitIndex = DBARTS_INVALID_RULE_VARIABLE;
   }
   
-  bool Rule::goesRight(const BARTFit& fit, const double* x) const
+  bool Rule::goesRight(const BARTFit& fit, const xint_t* xt) const
   {
     if (fit.data.variableTypes[variableIndex] == CATEGORICAL) {
       // x is a double, but that is 64 bits wide, and as such we can treat it as
       // a 64 bit integer
-      uint32_t categoryId = static_cast<uint32_t>(*(reinterpret_cast<const uint64_t*>(x + variableIndex)));
+      //uint32_t categoryId = static_cast<uint32_t>(*(reinterpret_cast<const uint64_t*>(x + variableIndex)));
+      uint32_t categoryId = static_cast<uint32_t>(*(reinterpret_cast<const xint_t*>(xt + variableIndex)));
       
       return categoryGoesRight(categoryId);
     } else {
-      const double* splitValues = fit.sharedScratch.cutPoints[variableIndex];
-      
-      return x[variableIndex] > splitValues[splitIndex];
+      return xt[variableIndex] > splitIndex; 
     }
   }
   
@@ -102,12 +101,31 @@ namespace dbarts {
     clearObservations();
   }
   
+  void SavedNode::clear()
+  {
+    if (leftChild != NULL) {
+      delete leftChild;
+      delete rightChild;
+      
+      leftChild = NULL;
+      rightChild = NULL;
+    }
+  }
+  
   Node::Node(size_t* observationIndices, size_t numObservations, size_t numPredictors) :
     parent(NULL), leftChild(NULL), enumerationIndex(BART_INVALID_NODE_ENUM), variablesAvailableForSplit(NULL),
     observationIndices(observationIndices), numObservations(numObservations)
   {
     variablesAvailableForSplit = new bool[numPredictors];
     for (size_t i = 0; i < numPredictors; ++i) variablesAvailableForSplit[i] = true;
+  }
+  
+  Node::Node(const Node& parent, size_t numPredictors) :
+    parent(const_cast<Node*>(&parent)), leftChild(NULL), enumerationIndex(BART_INVALID_NODE_ENUM),
+    variablesAvailableForSplit(NULL), observationIndices(NULL), numObservations(0)
+  {
+    variablesAvailableForSplit = new bool[numPredictors];
+    std::memcpy(variablesAvailableForSplit, this->parent->variablesAvailableForSplit, sizeof(bool) * numPredictors);
   }
   
   Node::Node(const Node& parent, size_t numPredictors, const Node& other) :
@@ -129,12 +147,29 @@ namespace dbarts {
     
     std::memcpy(variablesAvailableForSplit, other.variablesAvailableForSplit, sizeof(bool) * numPredictors);
   }
+    
+  SavedNode::SavedNode() :
+    parent(NULL), leftChild(NULL), rightChild(NULL), variableIndex(DBARTS_INVALID_RULE_VARIABLE), split(0.0)
+  {
+  }
+  
+  SavedNode::SavedNode(const BARTFit& fit, const SavedNode& parent, const Node& other) :
+    parent(const_cast<SavedNode*>(&parent)), leftChild(NULL), rightChild(NULL),
+    variableIndex(DBARTS_INVALID_RULE_VARIABLE), split(0.0)
+  {
+    if (other.leftChild != NULL) {
+      leftChild  = new SavedNode(fit, *this, *other.getLeftChild());
+      rightChild = new SavedNode(fit, *this, *other.getRightChild());
+      variableIndex = other.p.rule.variableIndex;
+      split = fit.cutPoints[variableIndex][other.p.rule.splitIndex];
+    }
+  }
   
   void Node::checkIndices(const BARTFit& fit, const Node& top) {
     if (&top != this) {
       ptrdiff_t offset = observationIndices - top.observationIndices;
       if (offset < 0 || offset > static_cast<ptrdiff_t>(fit.data.numObservations))
-        ext_throwError("obsrevationIndices out of range");
+        ext_throwError("observationIndices out of range");
       if (numObservations > fit.data.numObservations)
         ext_throwError("num observations greater than data");
       for (size_t i = 0; i < numObservations; ++i)
@@ -146,15 +181,6 @@ namespace dbarts {
       p.rightChild->checkIndices(fit, top);
     }
   }
-
-  
-  Node::Node(const Node& parent, size_t numPredictors) :
-    parent(const_cast<Node*>(&parent)), leftChild(NULL), enumerationIndex(BART_INVALID_NODE_ENUM),
-    variablesAvailableForSplit(NULL), observationIndices(NULL), numObservations(0)
-  {
-    variablesAvailableForSplit = new bool[numPredictors];
-    std::memcpy(variablesAvailableForSplit, this->parent->variablesAvailableForSplit, sizeof(bool) * numPredictors);
-  }
   
   Node::~Node()
   {
@@ -164,25 +190,13 @@ namespace dbarts {
     }
     delete [] variablesAvailableForSplit; variablesAvailableForSplit = NULL;
   }
-    
-  void Node::copyFrom(const BARTFit& fit, const Node& other)
+  
+  SavedNode::~SavedNode()
   {
-    parent = other.parent;
-    leftChild = other.leftChild;
     if (leftChild != NULL) {
-      p.rightChild = other.p.rightChild;
-      p.rule.copyFrom(other.p.rule);
+      delete leftChild; leftChild = NULL;
+      delete rightChild; rightChild = NULL;
     }
-    else {
-      m.average = other.m.average;
-      m.numEffectiveObservations = other.m.numEffectiveObservations;
-    }
-    
-    enumerationIndex = other.enumerationIndex;
-    std::memcpy(variablesAvailableForSplit, other.variablesAvailableForSplit, sizeof(bool) * fit.data.numPredictors);
-    
-    observationIndices = other.observationIndices;
-    numObservations = other.numObservations;
   }
   
   void Node::print(const BARTFit& fit, size_t indentation) const
@@ -199,7 +213,7 @@ namespace dbarts {
       
       if (fit.data.variableTypes[p.rule.variableIndex] == CATEGORICAL) {
         ext_printf("CATRule: ");
-        for (size_t i = 0; 0 < fit.sharedScratch.numCutsPerVariable[p.rule.variableIndex]; ++i) ext_printf(" %u", (p.rule.categoryDirections >> i) & 1);
+        for (size_t i = 0; 0 < fit.numCutsPerVariable[p.rule.variableIndex]; ++i) ext_printf(" %u", (p.rule.categoryDirections >> i) & 1);
       } else {
         ext_printf("ORDRule: (%d)=%f", p.rule.splitIndex, p.rule.getSplitValue(fit));
       }
@@ -211,6 +225,25 @@ namespace dbarts {
     if (!isBottom()) {
       leftChild->print(fit, indentation);
       p.rightChild->print(fit, indentation);
+    }
+  }
+  
+  void SavedNode::print(const BARTFit& fit, size_t indentation) const
+  {
+    ext_printf("%*s", indentation + getDepth(), "");
+    ext_printf("TBN: %u%u%u ", isTop(), isBottom(), childrenAreBottom());
+    
+    if (!isBottom()) {
+      ext_printf(" var: %d ", variableIndex);
+      ext_printf("ORDRule: %f", split);
+    } else {
+      ext_printf(" pred: %f", prediction);
+    }
+    ext_printf("\n");
+    
+    if (!isBottom()) {
+      leftChild->print(fit, indentation);
+      rightChild->print(fit, indentation);
     }
   }
   
@@ -260,6 +293,17 @@ namespace {
     
     fillBottomVector(*node.leftChild, result);
     fillBottomVector(*node.p.rightChild, result);
+  }
+  
+  void fillBottomVector(const SavedNode& node, SavedNodeVector& result)
+  {
+    if (node.leftChild == NULL) {
+      result.push_back(const_cast<SavedNode*>(&node));
+      return;
+    }
+    
+    fillBottomVector(*node.leftChild, result);
+    fillBottomVector(*node.rightChild, result);
   }
 
   void enumerateBottomNodes(Node& node, size_t& index)
@@ -333,6 +377,13 @@ namespace dbarts {
     fillBottomVector(*this, result);
     return result;
   }
+  
+  SavedNodeVector SavedNode::getBottomVector() const
+  {
+    SavedNodeVector result;
+    fillBottomVector(*this, result);
+    return result;
+  }
 
   void Node::enumerateBottomNodes()
   {
@@ -369,202 +420,39 @@ namespace dbarts {
     return result;
   }
   
-  Node* Node::findBottomNode(const BARTFit& fit, const double *x) const
+  Node* Node::findBottomNode(const BARTFit& fit, const xint_t* xt) const
   {
     if (isBottom()) return const_cast<Node*>(this);
     
-    if (p.rule.goesRight(fit, x)) return p.rightChild->findBottomNode(fit, x);
+    if (xt[p.rule.variableIndex] > p.rule.splitIndex) return p.rightChild->findBottomNode(fit, xt);
     
-    return leftChild->findBottomNode(fit, x);
-  }
-}
-
-
-namespace {
-  using namespace dbarts;
-  
-  struct IndexOrdering {
-    const BARTFit& fit;
-    const Rule &rule;
-    
-    IndexOrdering(const BARTFit& fit, const Rule &rule) : fit(fit), rule(rule) { }
-    
-    bool operator()(size_t i) const { return rule.goesRight(fit, fit.sharedScratch.xt + i * fit.data.numPredictors); }
-  };
-  
-  // returns how many observations are on the "left"
-  size_t partitionRange(size_t* restrict indices, size_t startIndex, size_t length, IndexOrdering& restrict indexGoesRight) {
-    size_t lengthOfLeft;
-    
-    size_t lh = 0, rh = length - 1;
-    size_t i = startIndex;
-    while (lh <= rh && rh > 0) {
-      if (indexGoesRight(i)) {
-        indices[rh] = i;
-        i = startIndex + rh--;
-      } else {
-        indices[lh] = i;
-        i = startIndex + ++lh;
-      }
-    }
-    if (lh == 0 && rh == 0) { // ugliness w/wrapping around at 0 makes an off-by-one when all obs go right
-      indices[startIndex] = i;
-      if (indexGoesRight(i)) {
-        lengthOfLeft = 0;
-      } else {
-        lengthOfLeft = 1;
-      }
-    } else {
-      lengthOfLeft = lh;
-    }
-    return lengthOfLeft;
+    return leftChild->findBottomNode(fit, xt);
   }
   
-  size_t partitionIndices(size_t* restrict indices, size_t length, IndexOrdering& restrict indexGoesRight) {
-    if (length == 0) return 0;
-    
-    size_t lengthOfLeft;
-    
-    size_t lh = 0, rh = length - 1;
-    while (lh <= rh && rh > 0) {
-      if (indexGoesRight(indices[lh])) {
-        size_t temp = indices[rh];
-        indices[rh] = indices[lh];
-        indices[lh] = temp;
-        --rh;
-      } else {
-        ++lh;
-      }
-    }
-    if (lh == 0 && rh == 0) {
-      if (indexGoesRight(indices[0])) {
-        lengthOfLeft = 0;
-      } else {
-        lengthOfLeft = 1;
-      }
-    } else {
-      lengthOfLeft = lh;
-    }
-    
-    return lengthOfLeft;
-  }
-  
-  /*
-   // http://en.wikipedia.org/wiki/XOR_swap_algorithm
-   void ext_swapVectors(size_t* restrict x, size_t* restrict y, size_t length)
-   {
-   if (length == 0) return;
-   
-   size_t lengthMod5 = length % 5;
-   
-   if (lengthMod5 != 0) {
-   for (size_t i = 0; i < lengthMod5; ++i) {
-   x[i] ^= y[i];
-   y[i] ^= x[i];
-   x[i] ^= y[i];
-   }
-   if (length < 5) return;
-   }
-   
-   for (size_t i = lengthMod5; i < length; i += 5) {
-   x[i    ] ^= y[i    ]; y[i    ] ^= x[i    ]; x[i    ] ^= y[i    ];
-   x[i + 1] ^= y[i + 1]; y[i + 1] ^= x[i + 1]; x[i + 1] ^= y[i + 1];
-   x[i + 2] ^= y[i + 2]; y[i + 2] ^= x[i + 2]; x[i + 2] ^= y[i + 2];
-   x[i + 3] ^= y[i + 3]; y[i + 3] ^= x[i + 3]; x[i + 3] ^= y[i + 3];
-   x[i + 4] ^= y[i + 4]; y[i + 4] ^= x[i + 4]; x[i + 4] ^= y[i + 4];
-   }
-   }
-   
-   // merges adjacent partitions of the form:
-   // [ l1 r1 l2 r2 ]
-   size_t mergeAdjacentPartitions(size_t* array, size_t firstTotalLength, size_t firstLeftLength,
-   size_t secondLeftLength)
-   {
-   // size_t* l1 = array;
-   size_t* r1 = array + firstLeftLength;
-   size_t* l2 = array + firstTotalLength;
-   // size_t* r2 = array + firstTotalLength + secondLeftLength;
-   
-   size_t firstRightLength = firstTotalLength - firstLeftLength;
-   
-   if (secondLeftLength <= firstRightLength) {
-   ext_swapVectors(r1, l2, secondLeftLength);
-   // end up w/[ l1 l2 r1_2 r1_1 r2 ]
-   } else {
-   ext_swapVectors(r1, l2 + (secondLeftLength - firstRightLength), firstRightLength);
-   // end up w/[ l1 l2_2 l2_1 r1 r2 ]
-   }
-   
-   return firstLeftLength + secondLeftLength;
-   }
-  
-  struct PartitionThreadData {
-    size_t* indices;
-    size_t startIndex;
-    size_t length;
-    IndexOrdering* ordering;
-    size_t numOnLeft;
-  };
-  
-  size_t mergePartitions(PartitionThreadData* data, size_t numThreads)
+  SavedNode* SavedNode::findBottomNode(const BARTFit& fit, const double* xt) const
   {
-    while (numThreads > 1) {
-      if (numThreads % 2 == 1) {
-        // if odd number, merge last two
-        PartitionThreadData* left = &data[numThreads - 2];
-        PartitionThreadData* right = &data[numThreads - 1];
-        
-        left->numOnLeft = mergeAdjacentPartitions(left->indices, left->length, left->numOnLeft, right->numOnLeft);
-        left->length += right->length;
-        
-        --numThreads;
-      }
-        
-      for (size_t i = 0; i < numThreads / 2; ++i) {
-        PartitionThreadData* left = &data[2 * i];
-        PartitionThreadData* right = &data[2 * i + 1];
-        
-        left->numOnLeft = mergeAdjacentPartitions(left->indices, left->length, left->numOnLeft, right->numOnLeft);
-        left->length += right->length;
-        
-        // now shift down in array so that valid stuffs always occupy the beginning
-        if (i > 0) {
-          right = &data[i];
-          std::memcpy(right, (const PartitionThreadData*) left, sizeof(PartitionThreadData));
-        }
-      }
-      numThreads /= 2;
-    }
-    return data[0].numOnLeft;
+    if (isBottom()) return const_cast<SavedNode*>(this);
+       
+    if (xt[variableIndex] > split) return rightChild->findBottomNode(fit, xt);
+    
+    return leftChild->findBottomNode(fit, xt);
   }
   
-  void partitionTask(void* v_data) {
-    PartitionThreadData& data(*static_cast<PartitionThreadData*>(v_data));
-
-    data.numOnLeft = (data.startIndex != ((size_t) -1) ? 
-                      partitionRange(data.indices, data.startIndex, data.length, *data.ordering) :
-                      partitionIndices(data.indices, data.length, *data.ordering));
-  } */
-} // anon namespace
-// MT not worth it for this, apparently
-// #define MIN_NUM_OBSERVATIONS_IN_NODE_PER_THREAD 5000
-
-namespace dbarts {
   void Node::addObservationsToChildren(const BARTFit& fit, size_t chainNum, const double* y) {
     if (isBottom()) {
       if (isTop()) {
         if (fit.data.weights == NULL) {
-          m.average = ext_htm_computeMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, numObservations);
+          m.average = misc_htm_computeMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, numObservations);
           m.numEffectiveObservations = static_cast<double>(numObservations);
         } else {
-          m.average = ext_htm_computeWeightedMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, numObservations, fit.data.weights, &m.numEffectiveObservations);
+          m.average = misc_htm_computeWeightedMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, numObservations, fit.data.weights, &m.numEffectiveObservations);
         }
       } else {
         if (fit.data.weights == NULL) {
-          m.average = ext_htm_computeIndexedMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, observationIndices, numObservations);
+          m.average = misc_htm_computeIndexedMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, observationIndices, numObservations);
           m.numEffectiveObservations = static_cast<double>(numObservations);
         } else {
-          m.average = ext_htm_computeIndexedWeightedMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, observationIndices, numObservations, fit.data.weights, &m.numEffectiveObservations);
+          m.average = misc_htm_computeIndexedWeightedMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, observationIndices, numObservations, fit.data.weights, &m.numEffectiveObservations);
         }
       }
       
@@ -574,48 +462,15 @@ namespace dbarts {
     leftChild->clearObservations();
     p.rightChild->clearObservations();
     
-    /*size_t numThreads, numElementsPerThread;
-    ext_mt_getNumThreadsForJob(fit.threadManager, numObservations, MIN_NUM_OBSERVATIONS_IN_NODE_PER_THREAD,
-                               &numThreads, &numElementsPerThread); */
-    
     
     if (numObservations > 0) {
       size_t numOnLeft = 0;
-      IndexOrdering ordering(fit, p.rule);
     
-      //if (numThreads <= 1) {
-        numOnLeft = (isTop() ?
-                     partitionRange(observationIndices, 0, numObservations, ordering) :
-                     partitionIndices(observationIndices, numObservations, ordering));
-      /*} else {
-        PartitionThreadData* threadData = ext_stackAllocate(numThreads, PartitionThreadData);
-        void** threadDataPtrs = ext_stackAllocate(numThreads, void*);
-      
-        size_t i;
-        for (i = 0; i < numThreads - 1; ++i) {
-          threadData[i].indices = observationIndices + i * numElementsPerThread;
-          threadData[i].startIndex = isTop() ? i * numElementsPerThread : ((size_t) -1);
-          threadData[i].length = numElementsPerThread;
-          threadData[i].ordering = &ordering;
-          threadDataPtrs[i] = &threadData[i];
-        }
-        threadData[i].indices = observationIndices + i * numElementsPerThread;
-        threadData[i].startIndex = isTop() ? i * numElementsPerThread : ((size_t) -1);
-        threadData[i].length = numObservations - i * numElementsPerThread;
-        threadData[i].ordering = &ordering;
-        threadDataPtrs[i] = &threadData[i];
-     
-      
-      
-        ext_mt_runTasks(fit.threadManager, &partitionTask, threadDataPtrs, numThreads);
-      
-      
-      
-        numOnLeft = mergePartitions(threadData, numThreads);
-      
-        ext_stackFree(threadDataPtrs);
-        ext_stackFree(threadData);
-      } */
+      numOnLeft = (isTop() ?
+                   misc_partitionRange(fit.sharedScratch.x + p.rule.variableIndex * fit.data.numObservations,
+                                       p.rule.splitIndex, observationIndices, numObservations) :
+                   misc_partitionIndices(fit.sharedScratch.x + p.rule.variableIndex * fit.data.numObservations,
+                                          p.rule.splitIndex, observationIndices, numObservations));
       
       leftChild->observationIndices = observationIndices;
       leftChild->numObservations = numOnLeft;
@@ -638,11 +493,11 @@ namespace dbarts {
     p.rightChild->clearObservations();
     
     if (numObservations > 0) {
-      IndexOrdering ordering(fit, p.rule);
-    
       size_t numOnLeft = (isTop() ?
-                   partitionRange(observationIndices, 0, numObservations, ordering) :
-                   partitionIndices(observationIndices, numObservations, ordering));
+                          misc_partitionRange(fit.sharedScratch.x + p.rule.variableIndex * fit.data.numObservations,
+                                              p.rule.splitIndex, observationIndices, numObservations) :
+                          misc_partitionIndices(fit.sharedScratch.x + p.rule.variableIndex * fit.data.numObservations,
+                                                p.rule.splitIndex, observationIndices, numObservations));
       
       leftChild->observationIndices = observationIndices;
       leftChild->numObservations = numOnLeft;
@@ -660,16 +515,16 @@ namespace dbarts {
         
     if (isTop()) {
       if (fit.data.weights == NULL) {
-        m.average = ext_htm_computeMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, numObservations);
+        m.average = misc_htm_computeMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, numObservations);
         m.numEffectiveObservations = static_cast<double>(numObservations);
       }
-      else m.average = ext_htm_computeWeightedMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, numObservations, fit.data.weights, &m.numEffectiveObservations);
+      else m.average = misc_htm_computeWeightedMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, numObservations, fit.data.weights, &m.numEffectiveObservations);
     } else {
       if (fit.data.weights == NULL) {
-        m.average = ext_htm_computeIndexedMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, observationIndices, numObservations);
+        m.average = misc_htm_computeIndexedMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, observationIndices, numObservations);
         m.numEffectiveObservations = static_cast<double>(numObservations);
       }
-      else m.average = ext_htm_computeIndexedWeightedMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, observationIndices, numObservations, fit.data.weights, &m.numEffectiveObservations);
+      else m.average = misc_htm_computeIndexedWeightedMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, observationIndices, numObservations, fit.data.weights, &m.numEffectiveObservations);
     }
   }
   
@@ -688,15 +543,15 @@ namespace dbarts {
   {
     if (isTop()) {
       if (fit.data.weights == NULL) {
-        return ext_htm_computeVarianceForKnownMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, numObservations, getAverage());
+        return misc_htm_computeVarianceForKnownMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, numObservations, getAverage());
       } else {
-        return ext_htm_computeWeightedVarianceForKnownMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, numObservations, fit.data.weights, getAverage());
+        return misc_htm_computeWeightedVarianceForKnownMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, numObservations, fit.data.weights, getAverage());
       }
     } else {
       if (fit.data.weights == NULL) {
-        return ext_htm_computeIndexedVarianceForKnownMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, observationIndices, numObservations, getAverage());
+        return misc_htm_computeIndexedVarianceForKnownMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, observationIndices, numObservations, getAverage());
       } else {
-        return ext_htm_computeIndexedWeightedVarianceForKnownMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, observationIndices, numObservations, fit.data.weights, getAverage());
+        return misc_htm_computeIndexedWeightedVarianceForKnownMean(fit.threadManager, fit.chainScratch[chainNum].taskId, y, observationIndices, numObservations, fit.data.weights, getAverage());
       }
     }
   }
@@ -712,17 +567,30 @@ namespace dbarts {
   void Node::setPredictions(double* y_hat, double prediction) const
   {
     if (isTop()) {
-      ext_setVectorToConstant(y_hat, getNumObservations(), prediction);
+      misc_setVectorToConstant(y_hat, getNumObservations(), prediction);
       return;
     }
     
-    ext_setIndexedVectorToConstant(y_hat, observationIndices, getNumObservations(), prediction);
+    misc_setIndexedVectorToConstant(y_hat, observationIndices, getNumObservations(), prediction);
   }
   
   size_t Node::getDepth() const
   {
     size_t result = 0;
     const Node* node = this;
+
+    while (!node->isTop()) {
+      ++result;
+      node = node->parent;
+    }
+    
+    return result;
+  }
+  
+  size_t SavedNode::getDepth() const
+  {
+    size_t result = 0;
+    const SavedNode* node = this;
 
     while (!node->isTop()) {
       ++result;
@@ -743,6 +611,12 @@ namespace dbarts {
   {
     if (isBottom()) return 0;
     return 2 + leftChild->getNumNodesBelow() + p.rightChild->getNumNodesBelow();
+  }
+  
+  size_t SavedNode::getNumNodesBelow() const
+  {
+    if (isBottom()) return 0;
+    return 2 + leftChild->getNumNodesBelow() + rightChild->getNumNodesBelow();
   }
   
   size_t Node::getNumVariablesAvailableForSplit(size_t numVariables) const {
@@ -798,4 +672,133 @@ namespace dbarts {
     leftChild->countVariableUses(variableCounts);
     p.rightChild->countVariableUses(variableCounts);
   }
+  
+  size_t Node::getSerializedLength(const BARTFit& fit) const {
+    size_t length;
+    
+    if (leftChild != NULL) {
+      length = sizeof(Rule);
+      length += length % sizeof(int);
+      
+      length += leftChild->getSerializedLength(fit);
+      length += p.rightChild->getSerializedLength(fit);
+    } else {
+      length = sizeof(std::int32_t);
+      length += length % sizeof(int);
+    }
+    
+    return length;
+  }
+  
+  size_t Node::serialize(const BARTFit& fit, void* state) const {
+    size_t length;
+    if (leftChild != NULL) {
+      std::memcpy(state, reinterpret_cast<const void*>(&p.rule), sizeof(Rule));
+      length = sizeof(Rule);
+      length += length % sizeof(int);
+      
+      length += leftChild->serialize(fit, reinterpret_cast<void*>(reinterpret_cast<char*>(state) + length));
+      length += p.rightChild->serialize(fit, reinterpret_cast<void*>(reinterpret_cast<char*>(state) + length));
+    } else {
+      *reinterpret_cast<std::int32_t*>(state) = DBARTS_INVALID_RULE_VARIABLE;
+      length = sizeof(std::int32_t);
+      length += length % sizeof(int);
+    }
+     
+    return length;
+  }
+  
+  size_t Node::deserialize(const BARTFit& fit, const void* state) {
+    size_t length;
+    std::int32_t variableIndex = *reinterpret_cast<const std::int32_t*>(state);
+    if (variableIndex != DBARTS_INVALID_RULE_VARIABLE) {
+      std::memcpy(reinterpret_cast<void*>(&p.rule), state, sizeof(Rule));
+      length = sizeof(Rule);
+      length += length % sizeof(int);
+      
+      leftChild    = new Node(*this, fit.data.numPredictors);
+      p.rightChild = new Node(*this, fit.data.numPredictors);
+      
+      length += leftChild->deserialize(fit, reinterpret_cast<const void*>(reinterpret_cast<const char*>(state) + length));
+      length += p.rightChild->deserialize(fit, reinterpret_cast<const void*>(reinterpret_cast<const char*>(state) + length));
+    } else {
+      length = sizeof(std::int32_t);
+      length += length % sizeof(int);
+    }
+    
+    return length;
+  }
+  
+  size_t SavedNode::getSerializedLength() const {
+    size_t length;
+    
+    length = sizeof(std::int32_t);
+    length += length % sizeof(int);
+    
+    if (leftChild != NULL) {
+      length += sizeof(double);
+      length += length % sizeof(int);
+      
+      length += leftChild->getSerializedLength();
+      length += rightChild->getSerializedLength();
+    } else {
+      length = sizeof(double);
+      length += length % sizeof(int);
+    }
+    
+    return length;
+  }
+  
+  size_t SavedNode::serialize(void* state) const {
+    size_t length;
+    if (leftChild != NULL) {
+      *reinterpret_cast<std::int32_t*>(state) = variableIndex;
+      length = sizeof(std::int32_t);
+      length += length % sizeof(int);
+      
+      *reinterpret_cast<double*>(reinterpret_cast<char*>(state) + length) = split;
+      length = sizeof(double);
+      length += length % sizeof(int);
+            
+      length += leftChild->serialize(reinterpret_cast<void*>(reinterpret_cast<char*>(state) + length));
+      length += rightChild->serialize(reinterpret_cast<void*>(reinterpret_cast<char*>(state) + length));
+    } else {
+      *reinterpret_cast<std::int32_t*>(state) = DBARTS_INVALID_RULE_VARIABLE;
+      length = sizeof(std::int32_t);
+      length += length % sizeof(int);
+      
+      *reinterpret_cast<double*>(reinterpret_cast<char*>(state) + length) = prediction;
+      length = sizeof(double);
+      length += length % sizeof(int);
+    }
+     
+    return length;
+  }
+  
+  size_t SavedNode::deserialize(const void* state) {
+    variableIndex = *reinterpret_cast<const std::int32_t*>(state);
+    size_t length = sizeof(std::int32_t);
+    length += length % sizeof(int);
+    
+    if (variableIndex != DBARTS_INVALID_RULE_VARIABLE) {
+      split = *reinterpret_cast<const double*>(reinterpret_cast<const char*>(state) + length);
+      length = sizeof(double);
+      length += length % sizeof(int);
+            
+      leftChild    = new SavedNode();
+      leftChild->parent = this;
+      rightChild = new SavedNode();
+      leftChild->parent = this;
+      
+      length += leftChild->deserialize(reinterpret_cast<const void*>(reinterpret_cast<const char*>(state) + length));
+      length += rightChild->deserialize(reinterpret_cast<const void*>(reinterpret_cast<const char*>(state) + length));
+    } else {
+      prediction = *reinterpret_cast<const double*>(reinterpret_cast<const char*>(state) + length);
+      length = sizeof(double);
+      length += length % sizeof(int);
+    }
+    
+    return length;
+  }
 }
+

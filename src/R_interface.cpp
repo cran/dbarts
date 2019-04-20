@@ -9,6 +9,8 @@
 
 #include <rc/util.h>
 
+#include <misc/simd.h>
+
 #include <dbarts/bartFit.hpp>
 #include <dbarts/R_C_interface.hpp>
 
@@ -201,6 +203,19 @@ extern "C" {
   {
     return Rf_duplicate(obj);
   }
+  
+  static SEXP setSIMDInstructionSet(SEXP i)
+  {
+    misc_simd_setSIMDInstructionSet(static_cast<misc_simd_instructionSet>(INTEGER(i)[0]));
+    return R_NilValue;
+  }
+
+  static SEXP getMaxSIMDInstructionSet()
+  {
+    misc_simd_instructionSet result = misc_simd_getMaxSIMDInstructionSet();
+    
+    return Rf_ScalarInteger(static_cast<int>(result));
+  }
 
 /*
 }
@@ -278,11 +293,14 @@ namespace {
     DEF_FUNC("dbarts_run", run, 3),
     DEF_FUNC("dbarts_sampleTreesFromPrior", sampleTreesFromPrior, 1),
     DEF_FUNC("dbarts_printTrees", printTrees, 4),
+    DEF_FUNC("dbarts_getTrees", getTrees, 4),
     DEF_FUNC("dbarts_predict", predict, 3),
     DEF_FUNC("dbarts_setResponse", setResponse, 2),
     DEF_FUNC("dbarts_setOffset", setOffset, 2),
-    DEF_FUNC("dbarts_setPredictor", setPredictor, 2),
-    DEF_FUNC("dbarts_updatePredictor", updatePredictor, 3),
+    DEF_FUNC("dbarts_setWeights", setWeights, 2),
+    DEF_FUNC("dbarts_setPredictor", setPredictor, 4),
+    DEF_FUNC("dbarts_updatePredictor", updatePredictor, 5),
+    DEF_FUNC("dbarts_setCutPoints", setCutPoints, 3),
     DEF_FUNC("dbarts_setTestPredictor", setTestPredictor, 2),
     DEF_FUNC("dbarts_setTestOffset", setTestOffset, 2),
     DEF_FUNC("dbarts_setTestPredictorAndOffset", setTestPredictorAndOffset, 3),
@@ -302,10 +320,10 @@ namespace {
     DEF_FUNC("dbarts_xbart", xbart, 14),
     DEF_FUNC("dbarts_guessNumCores", ::guessNumCores, 0),
     // experimental
-    DEF_FUNC("dbarts_saveToFile", saveToFile, 2),
-    DEF_FUNC("dbarts_loadFromFile", loadFromFile, 1),
     DEF_FUNC("dbarts_assignInPlace", assignInPlace, 3),
     // below: testing
+    DEF_FUNC("dbarts_setSIMDInstructionSet", setSIMDInstructionSet, 1),
+    DEF_FUNC("dbarts_getMaxSIMDInstructionSet", getMaxSIMDInstructionSet, 0),
     { NULL, NULL, 0 }
   };
 
@@ -331,6 +349,12 @@ namespace {
     DEF_FUNC("initializeNormalPriorFromOptions", dbarts_initializeNormalPriorFromOptions),
     DEF_FUNC("invalidateNormalPrior", dbarts_invalidateNormalPrior),
     
+    DEF_FUNC("createChiHyperprior", dbarts_createChiHyperprior),
+    DEF_FUNC("createChiHyperpriorFromOptions", dbarts_createChiHyperpriorFromOptions),
+    DEF_FUNC("destroyChiHyperprior", dbarts_destroyChiHyperprior),
+    DEF_FUNC("initializeChiHyperpriorFromOptions", dbarts_initializeChiHyperpriorFromOptions),
+    DEF_FUNC("invalidateChiHyperprior", dbarts_invalidateChiHyperprior),
+    
     DEF_FUNC("createChiSquaredPrior", dbarts_createChiSquaredPrior),
     DEF_FUNC("createChiSquaredPriorFromOptions", dbarts_createChiSquaredPriorFromOptions),
     DEF_FUNC("destroyChiSquaredPrior", dbarts_destroyChiSquaredPrior),
@@ -351,7 +375,6 @@ namespace {
     DEF_FUNC("setOffset", dbarts_setOffset),
     DEF_FUNC("setPredictor", dbarts_setPredictor),
     DEF_FUNC("updatePredictor", dbarts_updatePredictor),
-    DEF_FUNC("updatePredictors", dbarts_updatePredictors),
     DEF_FUNC("setTestPredictor", dbarts_setTestPredictor),
     DEF_FUNC("setTestOffset", dbarts_setTestOffset),
     DEF_FUNC("setTestPredictorsAndOffset", dbarts_setTestPredictorAndOffset),
@@ -382,6 +405,8 @@ extern "C" {
 #endif
     
     activeFits = new PointerSet(&compareExternalPointers);
+    
+    misc_simd_init();
   }
 }
 

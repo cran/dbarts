@@ -2,21 +2,18 @@
 #ifndef DBARTS_SCRATCH_HPP
 #define DBARTS_SCRATCH_HPP
 
-#include <cstddef>
-#include "cstdint.hpp" // int types
+#include <cstddef> // size_t
+#include <dbarts/types.hpp>
 
 namespace dbarts {
   struct ScaleFactor { double min, max, range; };
   
   struct SharedScratch {
     const double* yRescaled;
-    const double* xt; // x transpose
-    const double* xt_test;
+    const xint_t* x; // x mapped to integers
+    const xint_t* xt_test; // xt for the test obs
     
     ScaleFactor dataScale;
-    
-    const std::uint32_t* numCutsPerVariable;
-    const double* const* cutPoints;
   };
   struct ChainScratch {
     double* treeY;

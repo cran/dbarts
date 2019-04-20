@@ -51,17 +51,17 @@ extern "C" {
   }
   
   
-  int dbarts_setPredictor(BARTFit* fit, const double* newPredictor) {
-    return fit->setPredictor(newPredictor);
+  int dbarts_setPredictor(BARTFit* fit, const double* newPredictor, int forceUpdate, int updateCutPoints) {
+    return fit->setPredictor(newPredictor, forceUpdate, updateCutPoints);
   }
   
-  int dbarts_updatePredictor(BARTFit* fit, const double* newPredictor, size_t column) {
-    return fit->updatePredictor(newPredictor, column);
+  int dbarts_updatePredictor(BARTFit* fit, const double* newPredictor, size_t column, int forceUpdate, int updateCutPoints) {
+    return fit->updatePredictor(newPredictor, &column, 1, forceUpdate, updateCutPoints);
   }
   
-  int dbarts_updatePredictors(BARTFit* fit, const double* newPredictor, const size_t* columns, size_t numColumns)
+  int dbarts_updatePredictors(BARTFit* fit, const double* newPredictor, const size_t* columns, size_t numColumns, int forceUpdate, int updateCutPoints)
   {
-    return fit->updatePredictors(newPredictor, columns, numColumns);
+    return fit->updatePredictor(newPredictor, columns, numColumns, forceUpdate, updateCutPoints);
   }
   
   void dbarts_setTestPredictor(BARTFit* fit, const double* newTestPredictor, size_t numTestObservations)
@@ -109,18 +109,35 @@ extern "C" {
   NormalPrior* dbarts_createNormalPrior() {
     return new NormalPrior;
   }
-  NormalPrior* dbarts_createNormalPriorFromOptions(const Control* control, double k) {
-    return new NormalPrior(*control, k);
+  NormalPrior* dbarts_createNormalPriorFromOptions(const Control* control, const Model* model, double k) {
+    return new NormalPrior(*control, *model, k);
   }
   void dbarts_destroyNormalPrior(NormalPrior* prior) {
     delete prior;
   }
-  void dbarts_initializeNormalPriorFromOptions(NormalPrior* prior, const Control* control, double k)
+  void dbarts_initializeNormalPriorFromOptions(NormalPrior* prior, const Control* control, const Model* model, double k)
   {
-    new (prior) NormalPrior(*control, k);
+    new (prior) NormalPrior(*control, *model, k);
   }
   void dbarts_invalidateNormalPrior(NormalPrior* prior) {
     prior->~NormalPrior();
+  }
+  
+  ChiHyperprior* dbarts_createChiHyperprior() {
+    return new ChiHyperprior;
+  }
+  ChiHyperprior* dbarts_createChiHyperpriorFromOptions(double degreesOfFreedom, double scale) {
+    return new ChiHyperprior(degreesOfFreedom, scale);
+  }
+  void dbarts_destroyChiHyperprior(ChiHyperprior* prior) {
+    delete prior;
+  }
+  void dbarts_initializeChiHyperpriorFromOptions(ChiHyperprior* prior, double degreesOfFreedom, double scale)
+  {
+    new (prior) ChiHyperprior(degreesOfFreedom, scale);
+  }
+  void dbarts_invalidateChiHyperprior(ChiHyperprior* prior) {
+    prior->~ChiHyperprior();
   }
   
   ChiSquaredPrior* dbarts_createChiSquaredPrior() {

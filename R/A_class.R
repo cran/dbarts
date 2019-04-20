@@ -9,11 +9,27 @@ methods::setValidity("dbartsCGMPrior",
     if (object@base  <= 0.0 || object@base >= 1.0) return("'base' must be in (0, 1)")
   })
 
+# this is a prior over k
+methods::setClass("dbartsNodeHyperprior")
+methods::setClass("dbartsChiHyperprior", contains = "dbartsNodeHyperprior",
+                  slots = list(degreesOfFreedom = "numeric", scale = "numeric"))
+methods::setValidity("dbartsChiHyperprior",
+  function(object) {
+    if (object@degreesOfFreedom <= 0.0) return("'degreesOfFreedom' must be positive")
+    if (object@scale <= 0.0) return("'scale' must be positive")
+  })
+
+
+methods::setClassUnion("hyperpriorOrNumeric", c("dbartsNodeHyperprior", "numeric"))
+
 methods::setClass("dbartsNodePrior")
 methods::setClass("dbartsNormalPrior", contains = "dbartsNodePrior",
-                  slots = list(k = "numeric"))
+                  slots = list(k = "hyperpriorOrNumeric"))
 methods::setValidity("dbartsNormalPrior",
-  function(object) if (object@k <= 0.0) return("'k' must be positive"))
+  function(object) {
+    if (is.numeric(object@k) && object@k <= 0.0) return("'k' must be positive")
+    if (is(object@k, "dbartsNodeHyperprior")) return(validObject(object@k))
+  })
 
 methods::setClass("dbartsResidPrior")
 methods::setClass("dbartsChiSqPrior", contains = "dbartsResidPrior",
@@ -22,6 +38,12 @@ methods::setValidity("dbartsChiSqPrior",
  function(object) {
    if (object@df <= 0.0) return("'df' must be positive")
    if (object@quantile <= 0.0) return("'quantile' must be positive")
+  })
+methods::setClass("dbartsFixedPrior", contains = "dbartsResidPrior",
+                  slots = list(value = "numeric"))
+methods::setValidity("dbartsFixedPrior",
+ function(object) {
+   if (object@value <= 0.0) return("'value' must be positive")
   })
 
 methods::setClass("dbartsControl",
@@ -134,6 +156,7 @@ methods::setValidity("dbartsControl",
     TRUE
   })
 
+
 methods::setClass("dbartsModel",
   slots =
   list(p.birth_death = "numeric",
@@ -141,6 +164,8 @@ methods::setClass("dbartsModel",
        p.change      = "numeric",
        
        p.birth = "numeric",
+       
+       node.scale = "numeric",
        
        tree.prior  = "dbartsTreePrior",
        node.prior  = "dbartsNodePrior",
@@ -150,6 +175,7 @@ methods::setClass("dbartsModel",
        p.swap        = 0.0,
        p.change      = 0.0,
        p.birth       = 0.5,
+       node.scale    = 0.5,
        tree.prior    = new("dbartsCGMPrior"),
        node.prior    = new("dbartsNormalPrior"),
        resid.prior   = new("dbartsChiSqPrior")))
@@ -160,6 +186,8 @@ methods::setValidity("dbartsModel",
     if (abs(sum(proposalProbs) - 1.0) >= 1e-10) return("rule proposal probabilities must sum to 1")
     
     if (object@p.birth <= 0.0 || object@p.birth >= 1.0) return("birth probability for birth/death step must be in (0, 1)")
+    
+    if (object@node.scale <= 0.0) return("node.scale must be > 0")
     
     TRUE
   })
@@ -207,7 +235,8 @@ methods::setValidity("dbartsData",
     if (!is.null(object@weights)) {
       if (length(object@weights) != numObservations) return("'weights' must be null or have length equal to that of 'y'")
       if (anyNA(object@weights)) return("'weights' cannot be NA")
-      if (any(object@weights <= 0.0)) return("'weights' must all be positive")
+      if (any(object@weights < 0.0)) return("'weights' must all be non-negative")
+      if (any(object@weights == 0.0)) warning("'weights' of 0 will be ignored but increase computation time")
     }
     if (!is.null(object@offset) && length(object@offset) != numObservations) return("'offset' must be null or have length equal to that of 'y'")
     if (!anyNA(object@n.cuts) && length(object@n.cuts) != ncol(object@x)) return("length of 'n.cuts' must equal number of columns in 'x'")
@@ -217,10 +246,10 @@ methods::setValidity("dbartsData",
 
 ## this shouldn't ever get created, used, modified, whathaveyou
 methods::setClass("dbartsState",
-  slots = list(trees         = "character",
-               treeFits      = "numeric",
-               savedTrees    = "character",
-               savedTreeFits = "numeric",
-               sigma         = "numeric",
-               rng.state     = "integer"))
+  slots = list(trees      = "integer",
+               treeFits   = "numeric",
+               savedTrees = "integer",
+               sigma      = "numeric",
+               k          = "numericOrNULL",
+               rng.state  = "integer"))
 

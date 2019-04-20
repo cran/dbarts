@@ -4,6 +4,7 @@
 #include <cmath>     // sqrt
 #include <cstring>   // memcpy
 #include <cstddef>   // size_t
+#include <limits>    // nan
 
 #ifdef __INTEL_COMPILER
 #  define __need_timespec 1
@@ -22,12 +23,14 @@
 #include <vector>    //   split points
 #include <algorithm> // integer min
 
-#include <external/alloca.h>
+#include <misc/alloca.h>
+#include <misc/linearAlgebra.h>
+#include <misc/stats.h>
+
 #include <external/io.h>
+#include <external/linearAlgebra.h>
 #include <external/random.h>
 #include <external/stats.h>
-#include <external/stats_mt.h>
-#include <external/linearAlgebra.h>
 
 #include <dbarts/results.hpp>
 #include "functions.hpp"
@@ -43,6 +46,11 @@ namespace {
   void createRNG(BARTFit& fit);
   void destroyRNG(BARTFit& fit);
   void setInitialCutPoints(BARTFit& fit);
+  void setXIntegerCutMap(BARTFit& fit);
+  void setXIntegerCutMap(BARTFit& fit, const size_t* columns, size_t numColumns);
+  void setXTestIntegerCutMap(const BARTFit& fit, const double* x_test, size_t numTestObservations, xint_t* xt_test);
+  void setXTestIntegerCutMap(const BARTFit& fit, const double* x_test, size_t numTestObservations,
+                             xint_t* xt_test, const size_t* columns, size_t numColumns);
   void setInitialFit(BARTFit& fit);
   
   void setPrior(BARTFit& fit);
@@ -66,7 +74,7 @@ namespace {
   void sampleProbitLatentVariables(const BARTFit& fit, State& state, const double* fits, double* yRescaled);
   void storeSamples(const BARTFit& fit, size_t chainNum, Results& results,
                     const double* trainingSample, const double* testSample,
-                    double sigma, const uint32_t* variableCounts, size_t simNum);
+                    double sigma, double k, const uint32_t* variableCounts, size_t simNum);
   void countVariableUses(const BARTFit& fit, const State& state, uint32_t* variableCounts);
   
 #ifdef HAVE_SYS_TIME_H
@@ -82,30 +90,30 @@ namespace dbarts {
   {
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
       
-      ext_setVectorToConstant(chainScratch[chainNum].totalFits, data.numObservations, 0.0);
+      misc_setVectorToConstant(chainScratch[chainNum].totalFits, data.numObservations, 0.0);
       
       for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum)
-        ext_addVectorsInPlace(const_cast<const double*>(state[chainNum].treeFits + treeNum * data.numObservations),
-                              data.numObservations, 1.0,
-                              chainScratch[chainNum].totalFits);
+        misc_addVectorsInPlace(const_cast<const double*>(state[chainNum].treeFits + treeNum * data.numObservations),
+                               data.numObservations, 1.0,
+                               chainScratch[chainNum].totalFits);
       
       
       if (data.numTestObservations > 0) {
         double* testFits = new double[data.numTestObservations];
         
-        ext_setVectorToConstant(chainScratch[chainNum].totalTestFits, data.numTestObservations, 0.0);
+        misc_setVectorToConstant(chainScratch[chainNum].totalTestFits, data.numTestObservations, 0.0);
         
         for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
           double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
         
           // next allocates memory
-          double* nodePosteriorPredictions = state[chainNum].trees[treeNum].recoverAveragesFromFits(*this, treeFits);
+          double* nodeParams = state[chainNum].trees[treeNum].recoverParametersFromFits(*this, treeFits);
           
-          state[chainNum].trees[treeNum].setCurrentFitsFromAverages(*this, nodePosteriorPredictions, treeFits, testFits);
+          state[chainNum].trees[treeNum].setCurrentFitsFromParameters(*this, nodeParams, treeFits, testFits);
           
-          ext_addVectorsInPlace(const_cast<const double*>(testFits), data.numTestObservations, 1.0, chainScratch[chainNum].totalTestFits);
+          misc_addVectorsInPlace(const_cast<const double*>(testFits), data.numTestObservations, 1.0, chainScratch[chainNum].totalTestFits);
           
-          delete [] nodePosteriorPredictions;
+          delete [] nodeParams;
         }
         
         delete [] testFits;
@@ -116,7 +124,7 @@ namespace dbarts {
   void BARTFit::setResponse(const double* newY) {
     
     if (!control.responseIsBinary) {
-      double* sigmaUnscaled = ext_stackAllocate(control.numChains, double);
+      double* sigmaUnscaled = misc_stackAllocate(control.numChains, double);
       for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
         sigmaUnscaled[chainNum] = state[chainNum].sigma * sharedScratch.dataScale.range;
       
@@ -131,7 +139,7 @@ namespace dbarts {
       for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
         state[chainNum].sigma = sigmaUnscaled[chainNum] / sharedScratch.dataScale.range;
       
-      ext_stackFree(sigmaUnscaled);
+      misc_stackFree(sigmaUnscaled);
      
     } else {
       data.y = newY;
@@ -145,7 +153,7 @@ namespace dbarts {
   
   void BARTFit::setOffset(const double* newOffset) {
     if (!control.responseIsBinary) {
-      double* sigmaUnscaled = ext_stackAllocate(control.numChains, double);
+      double* sigmaUnscaled = misc_stackAllocate(control.numChains, double);
       for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
         sigmaUnscaled[chainNum] = state[chainNum].sigma * sharedScratch.dataScale.range;
       
@@ -160,7 +168,7 @@ namespace dbarts {
       for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
         state[chainNum].sigma = sigmaUnscaled[chainNum] / sharedScratch.dataScale.range;
       
-      ext_stackFree(sigmaUnscaled);
+      misc_stackFree(sigmaUnscaled);
       
     } else {
       data.offset = newOffset;
@@ -169,66 +177,133 @@ namespace dbarts {
         sampleProbitLatentVariables(*this, state[chainNum], const_cast<const double*>(chainScratch[chainNum].totalFits), chainScratch[chainNum].probitLatents);
     }
   }
-}
-
-namespace {
-  bool updateTreesWithNewPredictor(const BARTFit& fit, State* state, ChainScratch* chainScratch, bool allowInvalid) {
-    const Control& control(fit.control);
-    const Data& data(fit.data);
+  
+  void BARTFit::setWeights(const double* newWeights) {
+    data.weights = newWeights;
+  }
+  
+  void BARTFit::predict(const double* x_test, size_t numTestObservations, const double* testOffset, double* result) const
+  {
+    if (!control.keepTrees) ext_throwError("predict requires 'keepTrees' to be true");
     
-    size_t totalNumTrees = control.numTrees * control.numChains;
-    double** nodePosteriorPredictions = new double*[totalNumTrees];
-    for (size_t treeNum = 0; treeNum < totalNumTrees; ++treeNum)
-      nodePosteriorPredictions[treeNum] = NULL;
+    double* currTestFits = new double[numTestObservations];
+    double* totalTestFits = new double[numTestObservations];
     
-    bool allTreesAreValid = true;
-    bool* allTreesInChainAreValid = ext_stackAllocate(control.numChains, bool);
+    double* xt_test = new double[numTestObservations * data.numPredictors];
+    misc_transposeMatrix(x_test, numTestObservations, data.numPredictors, xt_test);
     
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
-      allTreesInChainAreValid[chainNum] = true;
-      
-      for (size_t treeNum = 0; treeNum < control.numTrees && allTreesInChainAreValid[chainNum] == true; ++treeNum) {
-        const double* treeFits = fit.state[chainNum].treeFits + treeNum * data.numObservations;
+      for (size_t sampleNum = 0; sampleNum < currentNumSamples; ++sampleNum) {
         
-        // next allocates memory
-        nodePosteriorPredictions[treeNum + chainNum * control.numTrees] = 
-          state[chainNum].trees[treeNum].recoverAveragesFromFits(fit, treeFits);
+        misc_setVectorToConstant(totalTestFits, numTestObservations, 0.0);
         
-        state[chainNum].trees[treeNum].top.addObservationsToChildren(fit);
+        for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
+          size_t treeOffset = treeNum + sampleNum * control.numTrees;
+          
+          state[chainNum].savedTrees[treeOffset].getPredictions(*this, xt_test, numTestObservations, currTestFits);
+          
+          misc_addVectorsInPlace(const_cast<const double*>(currTestFits), numTestObservations, 1.0, totalTestFits);
+        }
         
-        bool isValid = state[chainNum].trees[treeNum].isValid();
-        allTreesAreValid &= isValid;
-        allTreesInChainAreValid[chainNum] &= isValid;
+        double* result_i = result + (sampleNum + chainNum * currentNumSamples) * numTestObservations;
+        if (control.responseIsBinary) {
+          std::memcpy(result_i, const_cast<const double*>(totalTestFits), numTestObservations * sizeof(double));
+        } else {
+          misc_setVectorToConstant(result_i, numTestObservations, sharedScratch.dataScale.range * 0.5 + sharedScratch.dataScale.min);
+          misc_addVectorsInPlace(const_cast<const double*>(totalTestFits), numTestObservations, sharedScratch.dataScale.range, result_i);
+        }
+        
+        if (testOffset != NULL) misc_addVectorsInPlace(testOffset, numTestObservations, 1.0, result_i);
       }
     }
     
-    if (!allTreesAreValid && !allowInvalid) goto updateTreesWithNewPredictor_cleanup;
+    delete [] xt_test;
+    delete [] totalTestFits;
+    delete [] currTestFits;
+  }
+}
+
+namespace {
+  void forceUpdateTrees(BARTFit& fit) {
+    const Control& control(fit.control);
+    const Data& data(fit.data);
+    State* state(fit.state);
+    ChainScratch* chainScratch(fit.chainScratch);
+    
+    for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
+      misc_setVectorToConstant(chainScratch[chainNum].totalFits, data.numObservations, 0.0);
+      
+      for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
+        double* treeFits = const_cast<double*>(state[chainNum].treeFits + treeNum * data.numObservations);
+        
+        // duplicate old node parameters
+        double* nodeParams = state[chainNum].trees[treeNum].recoverParametersFromFits(fit, treeFits);
+        
+        state[chainNum].trees[treeNum].top.addObservationsToChildren(fit);
+        state[chainNum].trees[treeNum].collapseEmptyNodes(fit, nodeParams);
+        // this could be combined with collapseEmptyNodes
+        for (int32_t j = 0; j < static_cast<int32_t>(data.numPredictors); ++j)
+          updateVariablesAvailable(fit, state[chainNum].trees[treeNum].top, j);
+                
+        state[chainNum].trees[treeNum].setCurrentFitsFromParameters(fit, nodeParams, treeFits, NULL);
+        misc_addVectorsInPlace(treeFits, data.numObservations, 1.0, chainScratch[chainNum].totalFits);
+        
+        delete [] nodeParams;
+      }
+    }
+  }
+  
+  bool updateTreesWithNewPredictor(BARTFit& fit) {
+    const Control& control(fit.control);
+    const Data& data(fit.data);
+    State* state(fit.state);
+    ChainScratch* chainScratch(fit.chainScratch);
+    
+    size_t totalNumTrees = control.numTrees * control.numChains;
+    double** treeParams = new double*[totalNumTrees];
+    for (size_t treeNum = 0; treeNum < totalNumTrees; ++treeNum)
+      treeParams[treeNum] = NULL;
+    
+    bool allTreesAreValid = true;
+    
+    for (size_t chainNum = 0; chainNum < control.numChains && allTreesAreValid; ++chainNum) {
+      
+      for (size_t treeNum = 0; treeNum < control.numTrees && allTreesAreValid; ++treeNum) {
+        const double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
+        
+        // next allocates memory
+        treeParams[treeNum + chainNum * control.numTrees] = 
+          state[chainNum].trees[treeNum].recoverParametersFromFits(fit, treeFits);
+        
+        state[chainNum].trees[treeNum].top.addObservationsToChildren(fit);
+        
+        allTreesAreValid &= state[chainNum].trees[treeNum].isValid();
+      }
+    }
+    
+    if (!allTreesAreValid) goto updateTreesWithNewPredictor_cleanup;
     
     // go back across bottoms and set predictions to those mus for obs now in node
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
-      if (!allTreesInChainAreValid[chainNum]) continue;
-      
       for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
         double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
-        double* posteriorPredictions = nodePosteriorPredictions[treeNum + chainNum * control.numTrees];
+        const double* nodeParams = treeParams[treeNum + chainNum * control.numTrees];
         
-        ext_addVectorsInPlace(treeFits, data.numObservations, -1.0, chainScratch[chainNum].totalFits);
+        misc_addVectorsInPlace(treeFits, data.numObservations, -1.0, chainScratch[chainNum].totalFits);
         
-        state[chainNum].trees[treeNum].setCurrentFitsFromAverages(fit, posteriorPredictions, treeFits, NULL);
+        state[chainNum].trees[treeNum].setCurrentFitsFromParameters(fit, nodeParams, treeFits, NULL);
         for (int32_t j = 0; j < static_cast<int32_t>(data.numPredictors); ++j)
           updateVariablesAvailable(fit, state[chainNum].trees[treeNum].top, j);
         
-        ext_addVectorsInPlace(treeFits, data.numObservations, 1.0, chainScratch[chainNum].totalFits);
+        misc_addVectorsInPlace(treeFits, data.numObservations, 1.0, chainScratch[chainNum].totalFits);
       }
     }
         
 updateTreesWithNewPredictor_cleanup:
     for (size_t treeNum = totalNumTrees; treeNum > 0; --treeNum)
-      delete [] nodePosteriorPredictions[treeNum - 1];
+      delete [] treeParams[treeNum - 1];
     
-    ext_stackFree(allTreesInChainAreValid);
-    
-    delete [] nodePosteriorPredictions;
+    delete [] treeParams;
     
     return allTreesAreValid;
   }
@@ -236,122 +311,171 @@ updateTreesWithNewPredictor_cleanup:
 
 namespace dbarts {
   
-  void BARTFit::predict(const double* x_test, size_t numTestObservations, const double* testOffset, double* result) const
+  bool BARTFit::setPredictor(const double* newPredictor, bool forceUpdate, bool updateCutPoints)
   {
-    double* xt_test = new double[numTestObservations * data.numPredictors];
-    double* currTestFits = new double[numTestObservations];
-    double* totalTestFits = new double[numTestObservations];
+    const double* oldPredictor = data.x;
+    double** oldCutPoints = NULL;
     
-    if (!control.keepTrees) ext_throwError("predict requires 'keepTrees' to be true");
-    
-    ext_transposeMatrix(x_test, numTestObservations, data.numPredictors, xt_test);
-    
-    for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
-      for (size_t sampleNum = 0; sampleNum < currentNumSamples; ++sampleNum) {
-        
-        ext_setVectorToConstant(totalTestFits, numTestObservations, 0.0);
-        
-        for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
-          size_t treeOffset = treeNum + sampleNum * control.numTrees;
-          const double* treeFits = state[chainNum].savedTreeFits + treeOffset * data.numObservations;
-          
-          const double* nodePosteriorPredictions = state[chainNum].savedTrees[treeOffset].recoverAveragesFromFits(*this, treeFits);
-          
-          state[chainNum].savedTrees[treeOffset].setCurrentFitsFromAverages(*this, nodePosteriorPredictions, xt_test, numTestObservations, currTestFits);
-      
-          ext_addVectorsInPlace(const_cast<const double*>(currTestFits), numTestObservations, 1.0, totalTestFits);
-          
-          delete [] nodePosteriorPredictions;
-        }
-        
-        double* result_i = result + (sampleNum + chainNum * currentNumSamples) * numTestObservations;
-        if (control.responseIsBinary) {
-          std::memcpy(result_i, const_cast<const double*>(totalTestFits), numTestObservations * sizeof(double));
-        } else {
-          ext_setVectorToConstant(result_i, numTestObservations, sharedScratch.dataScale.range * 0.5 + sharedScratch.dataScale.min);
-          ext_addVectorsInPlace(const_cast<const double*>(totalTestFits), numTestObservations, sharedScratch.dataScale.range, result_i);
-        }
-        
-        if (testOffset != NULL) ext_addVectorsInPlace(testOffset, numTestObservations, 1.0, result_i);
+    // cache old cutpoints if necessary
+    if (!forceUpdate && updateCutPoints) {
+      oldCutPoints = new double*[data.numPredictors];
+      for (size_t j = 0; j < data.numPredictors; ++j) {
+        oldCutPoints[j] = new double[numCutsPerVariable[j]];
+        std::memcpy(oldCutPoints[j], cutPoints[j], numCutsPerVariable[j] * sizeof(double));
       }
     }
-    
-    delete [] totalTestFits;
-    delete [] currTestFits;
-    delete [] xt_test;
-  }
-
-  // this can leave the tree structures in an invalid state and doesn't roll-back
-  bool BARTFit::setPredictor(const double* newPredictor)
-  {
-    size_t* columns = ext_stackAllocate(data.numPredictors, size_t);
-    for (size_t i = 0; i < data.numPredictors; ++i) columns[i] = i;
-    
-    setCutPoints(*this, columns, data.numPredictors);
-    
-    ext_stackFree(columns);
     
     data.x = newPredictor;
     
-    ext_transposeMatrix(data.x, data.numObservations, data.numPredictors, const_cast<double*>(sharedScratch.xt));
+    if (updateCutPoints) {
+      // find new cut points from default rule
+      size_t* columns = misc_stackAllocate(data.numPredictors, size_t);
+      for (size_t i = 0; i < data.numPredictors; ++i) columns[i] = i;
+      
+      ::setCutPoints(*this, columns, data.numPredictors);
+      
+      misc_stackFree(columns);
+    }
     
-    return updateTreesWithNewPredictor(*this, state, chainScratch, true);
+    setXIntegerCutMap(*this);
+    
+    if (forceUpdate) {
+      forceUpdateTrees(*this);
+      if (data.numTestObservations > 0 && updateCutPoints)
+        setXTestIntegerCutMap(*this, data.x_test, data.numTestObservations, const_cast<xint_t*>(sharedScratch.xt_test));
+      return true;
+    }
+    
+    bool treesAreValid = updateTreesWithNewPredictor(*this);
+    
+    // rollback
+    if (!treesAreValid) {
+      data.x = oldPredictor;
+      
+      if (updateCutPoints) for (size_t j = 0; j < data.numPredictors; ++j)
+        std::memcpy(const_cast<double**>(cutPoints)[j], oldCutPoints[j], numCutsPerVariable[j] * sizeof(double));
+      
+      setXIntegerCutMap(*this);
+            
+      for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
+        for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum)
+          state[chainNum].trees[treeNum].top.addObservationsToChildren(*this);
+      }
+    } else {
+      if (updateCutPoints && data.numTestObservations > 0)
+        setXTestIntegerCutMap(*this, data.x_test, data.numTestObservations, const_cast<xint_t*>(sharedScratch.xt_test));
+    }
+    
+    if (updateCutPoints) {
+      for (size_t j = data.numPredictors; j > 0; --j) delete [] oldCutPoints[j - 1];
+      delete [] oldCutPoints;
+    }
+    
+    return treesAreValid;
   }
   
-  bool BARTFit::updatePredictor(const double* newPredictor, size_t column)
-  {
-    return updatePredictors(newPredictor, &column, 1);
-  }
-  
-  bool BARTFit::updatePredictors(const double* newPredictor, const size_t* columns, size_t numColumns)
+  bool BARTFit::updatePredictor(const double* newPredictor, const size_t* columns, size_t numColumns, bool forceUpdate, bool updateCutPoints)
   {
     // store current
-    double* oldPredictor = new double[data.numObservations * numColumns];
-    double** oldCutPoints = new double*[numColumns];
+    double* oldPredictor = NULL;
+    double** oldCutPoints = NULL;
     
-    for (size_t i = 0; i < numColumns; ++i) {
-      std::memcpy(oldPredictor + i * data.numObservations, data.x + columns[i] * data.numObservations, data.numObservations * sizeof(double));
-      oldCutPoints[i] = new double[sharedScratch.numCutsPerVariable[columns[i]]];
-      std::memcpy(oldCutPoints[i], sharedScratch.cutPoints[columns[i]], sharedScratch.numCutsPerVariable[columns[i]] * sizeof(double));
+    if (!forceUpdate) {
+      oldPredictor = new double[data.numObservations * numColumns];
+      for (size_t j = 0; j < numColumns; ++j)
+        std::memcpy(oldPredictor + j * data.numObservations, data.x + columns[j] * data.numObservations,
+                    data.numObservations * sizeof(double));
+      
+      if (updateCutPoints) {
+        oldCutPoints = new double*[numColumns];
+        for (size_t j = 0; j < numColumns; ++j) {
+          oldCutPoints[j] = new double[numCutsPerVariable[columns[j]]];
+          std::memcpy(oldCutPoints[j], cutPoints[columns[j]], numCutsPerVariable[columns[j]] * sizeof(double));
+        }
+      }
     }
     
+    double* x = const_cast<double*>(data.x);
+    for (size_t j = 0; j < numColumns; ++j) {
+      size_t col = columns[j];
+      std::memcpy(x + col * data.numObservations, newPredictor + j * data.numObservations, data.numObservations * sizeof(double));
+    }
     
     // install new
-    setCutPoints(*this, columns, numColumns);
+    if (updateCutPoints)
+      ::setCutPoints(*this, columns, numColumns);
     
-    double* x  = const_cast<double*>(data.x);
-    double* xt = const_cast<double*>(sharedScratch.xt);
-    for (size_t j = 0; j < numColumns; ++j) {
-      std::memcpy(x + columns[j] * data.numObservations, newPredictor + j * data.numObservations, data.numObservations * sizeof(double));
-      for (size_t i = 0; i < data.numObservations; ++i) {
-        xt[i * data.numPredictors + columns[j]] = newPredictor[i + j * data.numObservations];
-      }
+    setXIntegerCutMap(*this, columns, numColumns);
+    
+    if (forceUpdate) {
+      forceUpdateTrees(*this);
+      if (data.numTestObservations > 0 && updateCutPoints)
+        setXTestIntegerCutMap(*this, data.x_test, data.numTestObservations,
+                              const_cast<xint_t*>(sharedScratch.xt_test), columns, numColumns);
+      return true;
     }
     
-    bool treesAreValid = updateTreesWithNewPredictor(*this, state, chainScratch, false);
+    bool treesAreValid = updateTreesWithNewPredictor(*this);
     
     if (!treesAreValid) {
-      // rollback
       for (size_t j = 0; j < numColumns; ++j) {
-        std::memcpy(x + columns[j] * data.numObservations, oldPredictor + j * data.numObservations, data.numObservations * sizeof(double));
+        size_t col = columns[j];
         
-        std::memcpy(const_cast<double**>(sharedScratch.cutPoints)[columns[j]], oldCutPoints[j], sharedScratch.numCutsPerVariable[columns[j]] * sizeof(double));
-          
-        for (size_t i = 0; i < data.numObservations; ++i)
-          xt[i * data.numPredictors + columns[j]] = oldPredictor[i + j * data.numObservations];
+        std::memcpy(x + col * data.numObservations, oldPredictor + j * data.numObservations, data.numObservations * sizeof(double));
+        if (updateCutPoints)
+          std::memcpy(const_cast<double**>(cutPoints)[col], oldCutPoints[j], numCutsPerVariable[col] * sizeof(double));
       }
+      setXIntegerCutMap(*this, columns, numColumns);
       
       for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
         for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum)
           state[chainNum].trees[treeNum].top.addObservationsToChildren(*this);
       }
+    } else {
+      if (updateCutPoints && data.numTestObservations > 0)
+        setXTestIntegerCutMap(*this, data.x_test, data.numTestObservations,
+                              const_cast<xint_t*>(sharedScratch.xt_test), columns, numColumns);
     }
     
-    for (size_t j = 0; j < numColumns; ++j) delete [] oldCutPoints[j];
-    delete [] oldCutPoints;
+    if (updateCutPoints) {
+      for (size_t j = numColumns; j > 0; --j) delete [] oldCutPoints[j - 1];
+      delete [] oldCutPoints;
+    }
     delete [] oldPredictor;
     
     return treesAreValid;
+  }
+  
+  void BARTFit::setCutPoints(const double* const* newCutPoints, const uint32_t* numCutPoints,
+                             const size_t* columns, size_t numColumns)
+  {
+    for (size_t j = 0; j < numColumns; ++j) {
+      if (numCutPoints[j] > static_cast<uint32_t>(((1 >> sizeof(xint_t)) - 1))) {
+        ext_throwError("number of cut points for column %lu exceeds the max allowable; "
+                        "recompile package with -with-xint-size=32 or 64");
+      }
+    }
+    
+    // install the new cutpoints
+    for (size_t j = 0; j < numColumns; ++j) {
+      size_t col = columns[j];
+      if (numCutsPerVariable[col] != numCutPoints[j]) {
+        delete [] const_cast<double**>(cutPoints)[col];
+        const_cast<double**>(cutPoints)[col] = new double[numCutPoints[j]];
+        const_cast<uint32_t*>(numCutsPerVariable)[col] = numCutPoints[j];
+        
+        if (data.maxNumCuts[col] <= numCutPoints[j])
+          const_cast<uint32_t*>(data.maxNumCuts)[col] = numCutPoints[j];
+      }
+        
+      std::memcpy(const_cast<double**>(cutPoints)[col], newCutPoints[j], numCutsPerVariable[col] * sizeof(double));
+    }
+    setXIntegerCutMap(*this, columns, numColumns);
+    if (data.numTestObservations > 0)
+      setXTestIntegerCutMap(*this, data.x_test, data.numTestObservations,
+                              const_cast<xint_t*>(sharedScratch.xt_test), columns, numColumns);
+    
+    forceUpdateTrees(*this);
   }
   
 #define INVALID_ADDRESS reinterpret_cast<const double*>(this)
@@ -374,18 +498,18 @@ namespace {
     
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
       
-      ext_setVectorToConstant(chainScratch[chainNum].totalTestFits, data.numTestObservations, 0.0);
+      misc_setVectorToConstant(chainScratch[chainNum].totalTestFits, data.numTestObservations, 0.0);
       
       for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
         const double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
    
-        const double* nodePosteriorPredictions = state[chainNum].trees[treeNum].recoverAveragesFromFits(fit, treeFits);
+        const double* nodeParams = state[chainNum].trees[treeNum].recoverParametersFromFits(fit, treeFits);
       
-        state[chainNum].trees[treeNum].setCurrentFitsFromAverages(fit, nodePosteriorPredictions, NULL, currTestFits);
+        state[chainNum].trees[treeNum].setCurrentFitsFromParameters(fit, nodeParams, NULL, currTestFits);
       
-        ext_addVectorsInPlace(currTestFits, data.numTestObservations, 1.0, chainScratch[chainNum].totalTestFits);
+        misc_addVectorsInPlace(currTestFits, data.numTestObservations, 1.0, chainScratch[chainNum].totalTestFits);
       
-        delete [] nodePosteriorPredictions;
+        delete [] nodeParams;
       }
     }
     
@@ -414,12 +538,13 @@ namespace dbarts {
           if (chainScratch[chainNum].totalTestFits != NULL) { delete [] chainScratch[chainNum].totalTestFits; chainScratch[chainNum].totalTestFits = NULL; }
         data.numTestObservations = numTestObservations;
         
-        sharedScratch.xt_test = new double[data.numTestObservations * data.numPredictors];
+        sharedScratch.xt_test = new xint_t[data.numTestObservations * data.numPredictors];
         for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
           chainScratch[chainNum].totalTestFits = new double[data.numTestObservations];
       }
       
-      ext_transposeMatrix(data.x_test, data.numTestObservations, data.numPredictors, const_cast<double*>(sharedScratch.xt_test));
+      setXTestIntegerCutMap(*this, x_test, numTestObservations, const_cast<xint_t*>(sharedScratch.xt_test));
+      // misc_transposeMatrix(data.x_test, data.numTestObservations, data.numPredictors, const_cast<double*>(sharedScratch.xt_test));
       
       if (testOffset != INVALID_ADDRESS) data.testOffset = testOffset;
       
@@ -434,14 +559,17 @@ namespace dbarts {
   
   void BARTFit::updateTestPredictors(const double* newTestPredictor, const size_t* columns, size_t numColumns) {
     double* x_test = const_cast<double*>(data.x_test);
-    double* xt_test = const_cast<double*>(sharedScratch.xt_test);
+    xint_t* xt_test = const_cast<xint_t*>(sharedScratch.xt_test);
     
-    for (size_t j_ind = 0; j_ind < numColumns; ++j_ind) {
-      size_t j = columns[j_ind];
-      std::memcpy(x_test + j * data.numTestObservations, newTestPredictor + j_ind * data.numTestObservations, data.numTestObservations * sizeof(double));
+    for (size_t j = 0; j < numColumns; ++j) {
+      size_t col = columns[j];
+      std::memcpy(x_test + col * data.numTestObservations, newTestPredictor + j * data.numTestObservations, data.numTestObservations * sizeof(double));
       
       for (size_t i = 0; i < data.numTestObservations; ++i) {
-        xt_test[i * data.numPredictors + j] = newTestPredictor[i + j_ind * data.numTestObservations];
+        xint_t k = 0;
+        while (k < numCutsPerVariable[col] &&
+               x_test[i + col * data.numTestObservations] > cutPoints[col][k]) ++k;
+        xt_test[i * data.numPredictors + col] = k;
       }
     }
     
@@ -457,7 +585,7 @@ namespace dbarts {
    *   chainScratch.treeY         - just resize, is a temp array
    *   chainScratch.probitLatents - resize and initialize to new values
    *   sharedScratch.dataScale    - compute
-   *   sharedScratch.cutPoints and sharedScratch.numCutsPerVariable - compute from data.maxNumCuts and new data
+   *   cutPoints and numCutsPerVariable - compute from data.maxNumCuts and new data
    *
    *   state.trees         - we have to go through these and prune any now-invalid end nodes
    *   state.treeIndices   - resize and assign into trees
@@ -475,9 +603,9 @@ namespace dbarts {
     
     if (oldNumObservations != data.numObservations) {
       // handle resizing arrays
-      delete [] sharedScratch.xt;
+      delete [] sharedScratch.x;
       
-      sharedScratch.xt = new double[data.numObservations * data.numPredictors];
+      sharedScratch.x = new xint_t[data.numObservations * data.numPredictors];
       
       if (!control.responseIsBinary) {
         delete [] sharedScratch.yRescaled;
@@ -485,19 +613,15 @@ namespace dbarts {
       }
     }
     
-    size_t** oldTreeIndices      = ext_stackAllocate(control.numChains, size_t*);
-    double** oldTreeFits         = ext_stackAllocate(control.numChains, double*);
-    size_t** oldSavedTreeIndices = ext_stackAllocate(control.numChains, size_t*);
-    double** oldSavedTreeFits    = ext_stackAllocate(control.numChains, double*);
+    size_t** oldTreeIndices      = misc_stackAllocate(control.numChains, size_t*);
+    double** oldTreeFits         = misc_stackAllocate(control.numChains, double*);
     
-    double** currTestFits = ext_stackAllocate(control.numChains, double*);
+    double** currTestFits = misc_stackAllocate(control.numChains, double*);
     
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
       // extract from old data what we'll need to update
       oldTreeIndices[chainNum]      = state[chainNum].treeIndices;
       oldTreeFits[chainNum]         = state[chainNum].treeFits;
-      oldSavedTreeIndices[chainNum] = state[chainNum].savedTreeIndices;
-      oldSavedTreeFits[chainNum]    = state[chainNum].savedTreeFits;
       
       currTestFits[chainNum] = NULL;
       
@@ -515,10 +639,6 @@ namespace dbarts {
         
         state[chainNum].treeIndices = new size_t[data.numObservations * control.numTrees];
         state[chainNum].treeFits    = new double[data.numObservations * control.numTrees];
-        if (control.keepTrees) {
-          state[chainNum].savedTreeIndices = new size_t[data.numObservations * control.numTrees * currentNumSamples];
-          state[chainNum].savedTreeFits    = new double[data.numObservations * control.numTrees * currentNumSamples];
-        }
       }
     }
     
@@ -526,7 +646,7 @@ namespace dbarts {
     if (control.responseIsBinary) {
       initializeLatents(*this);
     } else {
-      double* sigmaUnscaled = ext_stackAllocate(control.numChains, double);
+      double* sigmaUnscaled = misc_stackAllocate(control.numChains, double);
       for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
         sigmaUnscaled[chainNum] = state[chainNum].sigma * sharedScratch.dataScale.range;
       
@@ -539,27 +659,27 @@ namespace dbarts {
       for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
         state[chainNum].sigma = sigmaUnscaled[chainNum] / sharedScratch.dataScale.range;
       
-      ext_stackFree(sigmaUnscaled);
+      misc_stackFree(sigmaUnscaled);
     }
            
     // cache old cut points, for use in updating trees
-    const double** oldCutPoints = ext_stackAllocate(data.numPredictors, const double*);
+    const double** oldCutPoints = misc_stackAllocate(data.numPredictors, const double*);
     for (size_t j = 0; j < data.numPredictors; ++j) {
-      oldCutPoints[j] = sharedScratch.cutPoints[j];
+      oldCutPoints[j] = cutPoints[j];
       // next assignments 'reset' the variables, so setCutPoints() ignores old values
-      const_cast<uint32_t*>(sharedScratch.numCutsPerVariable)[j] = static_cast<uint32_t>(-1);
-      const_cast<double**>(sharedScratch.cutPoints)[j] = NULL;
+      const_cast<uint32_t*>(numCutsPerVariable)[j] = static_cast<uint32_t>(-1);
+      const_cast<double**>(cutPoints)[j] = NULL;
     }
     // set new cut points
-    size_t* columns = ext_stackAllocate(data.numPredictors, size_t);
+    size_t* columns = misc_stackAllocate(data.numPredictors, size_t);
     for (size_t j = 0; j < data.numPredictors; ++j) columns[j] = j;
-    setCutPoints(*this, columns, data.numPredictors);
-    ext_stackFree(columns);
+    ::setCutPoints(*this, columns, data.numPredictors);
+    misc_stackFree(columns);
     
     // now initialize remaining arrays that use numObs
-    ext_transposeMatrix(data.x, data.numObservations, data.numPredictors, const_cast<double*>(sharedScratch.xt)); 
+    setXIntegerCutMap(*this);
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
-      ext_setVectorToConstant(chainScratch[chainNum].totalFits, data.numObservations, 0.0);
+      misc_setVectorToConstant(chainScratch[chainNum].totalFits, data.numObservations, 0.0);
     
     
     if (data.numTestObservations == 0 || data.x_test == NULL) {
@@ -574,19 +694,18 @@ namespace dbarts {
       // handle resizing test arrays and initializing them
       if (oldNumTestObservations != data.numTestObservations) {
         delete [] sharedScratch.xt_test;
-        sharedScratch.xt_test = new double[data.numTestObservations * data.numPredictors];
+        sharedScratch.xt_test = new xint_t[data.numTestObservations * data.numPredictors];
         
         for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
           delete [] chainScratch[chainNum].totalTestFits;
           chainScratch[chainNum].totalTestFits = new double[data.numTestObservations];
         }
       }
+      setXTestIntegerCutMap(*this, data.x_test, data.numTestObservations, const_cast<xint_t*>(sharedScratch.xt_test));
       
-      ext_transposeMatrix(data.x_test, data.numTestObservations, data.numPredictors, const_cast<double*>(sharedScratch.xt_test));
-
       for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
         currTestFits[chainNum] = new double[data.numTestObservations];
-        ext_setVectorToConstant(chainScratch[chainNum].totalTestFits, data.numTestObservations, 0.0);
+        misc_setVectorToConstant(chainScratch[chainNum].totalTestFits, data.numTestObservations, 0.0);
       }
     }
     
@@ -601,10 +720,10 @@ namespace dbarts {
         state[chainNum].trees[treeNum].top.enumerateBottomNodes();
         
         // this allocates memory; predictions are of length equal to the number of bottom nodes
-        double* nodePosteriorPredictions = state[chainNum].trees[treeNum].recoverAveragesFromFits(*this, oldTreeFits_i);
+        double* nodeParams = state[chainNum].trees[treeNum].recoverParametersFromFits(*this, oldTreeFits_i);
         
         // the mapping can end up with some end-nodes that no longer exist, handles that internally
-        state[chainNum].trees[treeNum].mapOldCutPointsOntoNew(*this, oldCutPoints, nodePosteriorPredictions);
+        state[chainNum].trees[treeNum].mapOldCutPointsOntoNew(*this, oldCutPoints, nodeParams);
         
         if (oldNumObservations != data.numObservations) {
           state[chainNum].trees[treeNum].top.observationIndices = state[chainNum].treeIndices + treeNum * data.numObservations;
@@ -612,68 +731,38 @@ namespace dbarts {
         }
         
         state[chainNum].trees[treeNum].top.addObservationsToChildren(*this);
-        state[chainNum].trees[treeNum].collapseEmptyNodes(*this, nodePosteriorPredictions);
+        state[chainNum].trees[treeNum].collapseEmptyNodes(*this, nodeParams);
         for (int32_t i = 0; i < static_cast<int32_t>(data.numPredictors); ++i)
           updateVariablesAvailable(*this, state[chainNum].trees[treeNum].top, i);
         
         double* currTreeFits = state[chainNum].treeFits + treeNum * data.numObservations;
-        state[chainNum].trees[treeNum].setCurrentFitsFromAverages(*this, nodePosteriorPredictions, currTreeFits, currTestFits[chainNum]);
-        ext_addVectorsInPlace(currTreeFits, data.numObservations, 1.0, chainScratch[chainNum].totalFits);
+        state[chainNum].trees[treeNum].setCurrentFitsFromParameters(*this, nodeParams, currTreeFits, currTestFits[chainNum]);
+        misc_addVectorsInPlace(currTreeFits, data.numObservations, 1.0, chainScratch[chainNum].totalFits);
         
         if (data.numTestObservations > 0)
-          ext_addVectorsInPlace(currTestFits[chainNum], data.numTestObservations, 1.0, chainScratch[chainNum].totalTestFits);
+          misc_addVectorsInPlace(currTestFits[chainNum], data.numTestObservations, 1.0, chainScratch[chainNum].totalTestFits);
         
-        delete [] nodePosteriorPredictions;
-      }
-      
-      if (control.keepTrees) for (size_t sampleNum = 0; sampleNum < currentNumSamples; ++sampleNum) {
-        for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
-          size_t treeOffset = treeNum + sampleNum * control.numTrees;
-          
-          const double* oldTreeFits_i = oldSavedTreeFits[chainNum] + treeOffset * oldNumObservations;
-          
-          state[chainNum].savedTrees[treeOffset].top.enumerateBottomNodes();
-          
-          double* nodePosteriorPredictions = state[chainNum].savedTrees[treeOffset].recoverAveragesFromFits(*this, oldTreeFits_i);
-          
-          state[chainNum].savedTrees[treeOffset].mapOldCutPointsOntoNew(*this, oldCutPoints, nodePosteriorPredictions);
-          
-          if (oldNumObservations != data.numObservations) {
-            state[chainNum].savedTrees[treeOffset].top.observationIndices = state[chainNum].savedTreeIndices + treeOffset * data.numObservations;
-            state[chainNum].savedTrees[treeOffset].top.numObservations = data.numObservations;
-          }
-          
-          state[chainNum].savedTrees[treeOffset].top.addObservationsToChildren(*this);
-          state[chainNum].savedTrees[treeOffset].collapseEmptyNodes(*this, nodePosteriorPredictions);
-          for (int32_t i = 0; i < static_cast<int32_t>(data.numPredictors); ++i)
-            updateVariablesAvailable(*this, state[chainNum].savedTrees[treeOffset].top, i);
-          
-          delete [] nodePosteriorPredictions;
-        }
+        delete [] nodeParams;
       }
     }
     
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
-      delete [] currTestFits[chainNum]; // can be NULL, no big deal
+      delete [] currTestFits[chainNum];
     
     for (size_t i = 0; i < data.numPredictors; ++i) delete [] oldCutPoints[i];
-    ext_stackFree(oldCutPoints);
+    misc_stackFree(oldCutPoints);
     
     if (oldNumObservations != data.numObservations) {
       for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
-        delete [] oldSavedTreeFits[chainNum];
-        delete [] oldSavedTreeIndices[chainNum];
         delete [] oldTreeFits[chainNum];
         delete [] oldTreeIndices[chainNum];
       }
     }
     
-    ext_stackFree(currTestFits);
+    misc_stackFree(currTestFits);
     
-    ext_stackFree(oldSavedTreeFits);
-    ext_stackFree(oldSavedTreeIndices);
-    ext_stackFree(oldTreeFits);
-    ext_stackFree(oldTreeIndices);
+    misc_stackFree(oldTreeFits);
+    misc_stackFree(oldTreeIndices);
   }
   
   void BARTFit::setControl(const Control& newControl)
@@ -711,8 +800,8 @@ namespace dbarts {
       nodePrior->precision = precisionUnscaled * static_cast<double>(newControl.numTrees);
     }
     
-    ext_rng_algorithm_t old_rng_algorithm = control.rng_algorithm;
-    ext_rng_standardNormal_t old_rng_standardNormal = control.rng_standardNormal;
+    rng_algorithm_t old_rng_algorithm = control.rng_algorithm;
+    rng_standardNormal_t old_rng_standardNormal = control.rng_standardNormal;
     
     control = newControl;
     
@@ -756,12 +845,12 @@ namespace dbarts {
           size_t treeNum = treeIndices[k];
           
           const double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
-          double* nodePosteriorPredictions = state[chainNum].trees[treeNum].recoverAveragesFromFits(*this, treeFits);
+          double* nodeParams = state[chainNum].trees[treeNum].recoverParametersFromFits(*this, treeFits);
           
           NodeVector bottomNodes(const_cast<Tree*>(&state[chainNum].trees[treeNum])->top.getBottomVector());
           size_t numBottomNodes = bottomNodes.size();
-          for (size_t k = 0; k < numBottomNodes; ++k) bottomNodes[k]->setAverage(nodePosteriorPredictions[k]);
-          delete [] nodePosteriorPredictions;
+          for (size_t k = 0; k < numBottomNodes; ++k) bottomNodes[k]->setAverage(nodeParams[k]);
+          delete [] nodeParams;
           
           state[chainNum].trees[treeNum].top.print(*this, indent);
         }
@@ -776,20 +865,184 @@ namespace dbarts {
           
           size_t treeOffset = treeNum + sampleNum * control.numTrees;
           
-          const double* treeFits = state[chainNum].treeFits + treeOffset * data.numObservations;
-          double* nodePosteriorPredictions = state[chainNum].trees[treeOffset].recoverAveragesFromFits(*this, treeFits);
-          
-          NodeVector bottomNodes(const_cast<Tree*>(&state[chainNum].trees[treeOffset])->top.getBottomVector());
-          size_t numBottomNodes = bottomNodes.size();
-          for (size_t k = 0; k < numBottomNodes; ++k) bottomNodes[k]->setAverage(nodePosteriorPredictions[k]);
-          delete [] nodePosteriorPredictions;
-          
-          state[chainNum].trees[treeOffset].top.print(*this, indent);
+          state[chainNum].savedTrees[treeOffset].top.print(*this, indent);
         }
         if (numSampleIndices > 1) indent -= 2;
       }
       if (numChainIndices > 1) indent -= 2;
     }
+  }
+}
+
+namespace {
+  using namespace dbarts;
+  
+  size_t storeFlattenedTree(const BARTFit& fit, const Node& node, size_t* numObservations,
+                            int32_t* variable, double* value)
+  {
+    if (node.isBottom()) {
+      *numObservations = node.numObservations;
+      *variable = DBARTS_INVALID_RULE_VARIABLE;
+      *value = node.m.average;
+      return 1;
+    }
+    
+    *numObservations = node.numObservations;
+    *variable = node.p.rule.variableIndex;
+    *value = fit.cutPoints[node.p.rule.variableIndex][node.p.rule.splitIndex];
+    
+    size_t numNodes = 1;
+    numNodes += storeFlattenedTree(fit, *node.getLeftChild(), numObservations + numNodes,
+                                   variable + numNodes, value + numNodes);
+    numNodes += storeFlattenedTree(fit, *node.getRightChild(), numObservations + numNodes,
+                                   variable + numNodes, value + numNodes);
+    
+    return numNodes;  
+  }
+  
+  size_t storeFlattenedTree(const BARTFit& fit, const SavedNode& node, std::set<size_t>& indexSet,
+                            size_t* numObservations, int32_t* variable, double* value)
+  {
+    if (node.isBottom()) {
+      *numObservations = indexSet.size();
+      *variable = DBARTS_INVALID_RULE_VARIABLE;
+      *value = node.prediction;
+      return 1;
+    }
+    
+    *numObservations = indexSet.size();
+    *variable = node.variableIndex;
+    *value = node.split;
+    
+    std::set<size_t> leftIndexSet;
+    std::set<size_t> rightIndexSet;
+    
+    for (std::set<size_t>::iterator it = indexSet.begin(); it != indexSet.end(); ++it) {
+      size_t i = *it;
+      
+      if (fit.data.x[i + fit.data.numObservations * node.variableIndex] <= node.prediction) {
+        rightIndexSet.insert(i);
+      } else {
+        leftIndexSet.insert(i); 
+      }
+    }
+    
+    size_t numNodes = 1;
+    numNodes += storeFlattenedTree(fit, *node.getLeftChild(), leftIndexSet,
+                                   numObservations + numNodes, variable + numNodes, value + numNodes);
+    numNodes += storeFlattenedTree(fit, *node.getRightChild(), rightIndexSet,
+                                   numObservations + numNodes, variable + numNodes, value + numNodes);
+    
+    return numNodes;  
+  }
+}
+
+namespace dbarts {
+  FlattenedTrees::FlattenedTrees(size_t totalNumNodes) : totalNumNodes(totalNumNodes), chainNumber(NULL),
+    sampleNumber(NULL), treeNumber(NULL), numObservations(NULL), variable(NULL), value(NULL)
+  {
+    chainNumber     = new size_t[totalNumNodes];
+    sampleNumber    = new size_t[totalNumNodes];
+    treeNumber      = new size_t[totalNumNodes];
+    numObservations = new size_t[totalNumNodes];
+    variable = new int32_t[totalNumNodes];
+    value = new double[totalNumNodes];
+  }
+  FlattenedTrees::~FlattenedTrees() {
+    delete [] value;
+    delete [] variable;
+    delete [] numObservations;
+    delete [] treeNumber;
+    delete [] sampleNumber;
+    delete [] chainNumber;
+  }
+  
+  FlattenedTrees* BARTFit::getFlattenedTrees(const size_t* chainIndices, size_t numChainIndices,
+                                             const size_t* sampleIndices, size_t numSampleIndices,
+                                             const size_t* treeIndices, size_t numTreeIndices) const
+  {
+    
+    size_t totalNumNodes = 0;
+    
+    // count how many nodes we're getting
+    for (size_t i = 0; i < numChainIndices; ++i) {
+      size_t chainNum = chainIndices[i];
+      
+      if (!control.keepTrees) { 
+        for (size_t k = 0; k < numTreeIndices; ++k) {
+          size_t treeNum = treeIndices[k];
+          totalNumNodes += 1 + state[chainNum].trees[treeNum].top.getNumNodesBelow();
+        }
+      } else for (size_t j = 0; j < numSampleIndices; ++j) {
+        size_t sampleNum = sampleIndices[j];
+        for (size_t k = 0; k < numTreeIndices; ++k) {
+          size_t treeNum = treeIndices[k];
+          size_t treeOffset = treeNum + sampleNum * control.numTrees;
+          totalNumNodes += 1 + state[chainNum].savedTrees[treeOffset].top.getNumNodesBelow();
+        }
+      }
+    }
+    
+    FlattenedTrees* resultPtr = new FlattenedTrees(totalNumNodes);
+    FlattenedTrees& result(*resultPtr);
+    
+    size_t offset = 0;
+    for (size_t i = 0; i < numChainIndices; ++i) {
+      size_t chainNum = chainIndices[i];
+      
+      if (!control.keepTrees) { 
+        for (size_t k = 0; k < numTreeIndices; ++k) {
+          size_t treeNum = treeIndices[k];
+          
+          // get nodes to store averages
+          const double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
+          double* nodeParams = state[chainNum].trees[treeNum].recoverParametersFromFits(*this, treeFits);
+          
+          NodeVector bottomNodes(const_cast<Tree*>(&state[chainNum].trees[treeNum])->top.getBottomVector());
+          size_t numBottomNodes = bottomNodes.size();
+          for (size_t k = 0; k < numBottomNodes; ++k) bottomNodes[k]->setAverage(nodeParams[k]);
+          delete [] nodeParams;
+          
+          
+          size_t numNodesInTree = storeFlattenedTree(*this, state[chainNum].trees[treeNum].top,
+                                                     result.numObservations + offset,
+                                                     result.variable + offset,
+                                                     result.value + offset);
+          
+          for (size_t l = 0; l < numNodesInTree; ++l) {
+            result.chainNumber [offset + l] = chainNum;
+            result.sampleNumber[offset + l] = 0;
+            result.treeNumber  [offset + l] = treeNum;
+          }
+          offset += numNodesInTree;
+        }
+      } else {
+        std::set<size_t> indexSet;
+        for (size_t i = 0; i < data.numObservations; ++i) indexSet.insert(i);
+        
+        for (size_t j = 0; j < numSampleIndices; ++j) {
+          size_t sampleNum = sampleIndices[j];
+          for (size_t k = 0; k < numTreeIndices; ++k) {
+            size_t treeNum = treeIndices[k];
+            size_t treeOffset = treeNum + sampleNum * control.numTrees;
+            
+            size_t numNodesInTree = storeFlattenedTree(*this, state[chainNum].savedTrees[treeOffset].top,
+                                                       indexSet,
+                                                       result.numObservations + offset,
+                                                       result.variable + offset,
+                                                       result.value + offset);
+            for (size_t l = 0; l < numNodesInTree; ++l) {
+              result.chainNumber [offset + l] = chainNum;
+              result.sampleNumber[offset + l] = sampleNum;
+              result.treeNumber  [offset + l] = treeNum;
+            }
+            offset += numNodesInTree;
+          }
+        }
+      }
+    }
+    
+    return resultPtr;
   }
   
   BARTFit::BARTFit(Control control, Model model, Data data) :
@@ -805,6 +1058,9 @@ namespace dbarts {
     
     setPrior(*this);
     setInitialCutPoints(*this);
+    setXIntegerCutMap(*this);
+    if (data.numTestObservations > 0)
+      setXTestIntegerCutMap(*this, data.x_test, data.numTestObservations, const_cast<xint_t*>(sharedScratch.xt_test));
     setInitialFit(*this);
 
     if (this->control.verbose) printInitialSummary(*this);
@@ -815,7 +1071,7 @@ namespace dbarts {
     destroyRNG(*this);
     
     delete [] sharedScratch.yRescaled; sharedScratch.yRescaled = NULL;
-    delete [] sharedScratch.xt; sharedScratch.xt = NULL;
+    delete [] sharedScratch.x; sharedScratch.x = NULL;
     delete [] sharedScratch.xt_test; sharedScratch.xt_test = NULL;
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
       delete [] chainScratch[chainNum].totalTestFits; chainScratch[chainNum].totalTestFits = NULL;
@@ -826,18 +1082,18 @@ namespace dbarts {
     
     delete [] chainScratch;
     
-    delete [] sharedScratch.numCutsPerVariable; sharedScratch.numCutsPerVariable = NULL;
-    if (sharedScratch.cutPoints != NULL) {
-      for (size_t i = 0; i < data.numPredictors; ++i) delete [] sharedScratch.cutPoints[i];
+    delete [] numCutsPerVariable; numCutsPerVariable = NULL;
+    if (cutPoints != NULL) {
+      for (size_t i = 0; i < data.numPredictors; ++i) delete [] cutPoints[i];
     }
-    delete [] sharedScratch.cutPoints; sharedScratch.cutPoints = NULL;
+    delete [] cutPoints; cutPoints = NULL;
     
     for (size_t chainNum = control.numChains; chainNum > 0; --chainNum)
       state[chainNum - 1].invalidate(control.numTrees, currentNumSamples);
     
     ::operator delete (state);
     
-    ext_htm_destroy(threadManager);
+    misc_htm_destroy(threadManager);
   }
   
   Results* BARTFit::runSampler()
@@ -846,9 +1102,11 @@ namespace dbarts {
     Results* resultsPointer = new Results(data.numObservations, data.numPredictors,
                                           data.numTestObservations,
                                           control.defaultNumSamples == 0 ? 1 : control.defaultNumSamples,
-                                          control.numChains);
+                                          control.numChains,
+                                          model.kPrior != NULL);
+    size_t numBurnIn = control.defaultNumBurnIn - (control.defaultNumSamples == 0 && control.defaultNumBurnIn > 0 ? 1 : 0);
     
-    runSampler(control.defaultNumBurnIn, resultsPointer);
+    runSampler(numBurnIn, resultsPointer);
     
     if (control.defaultNumSamples == 0) {
       delete resultsPointer;
@@ -863,7 +1121,9 @@ namespace dbarts {
     Results* resultsPointer = new Results(data.numObservations, data.numPredictors,
                                           data.numTestObservations,
                                           numSamples == 0 ? 1 : numSamples,
-                                          control.numChains);
+                                          control.numChains,
+                                          model.kPrior != NULL);
+    numBurnIn -= numSamples == 0 && numBurnIn > 0 ? 1 : 0;
     
     runSampler(numBurnIn, resultsPointer);
     
@@ -920,20 +1180,20 @@ extern "C" {
     double* currFits = new double[data.numObservations];
     double* currTestFits = data.numTestObservations > 0 ? new double[data.numTestObservations] : NULL;
     
-    uint32_t* variableCounts = ext_stackAllocate(data.numPredictors, uint32_t);
+    uint32_t* variableCounts = misc_stackAllocate(data.numPredictors, uint32_t);
     
     size_t totalNumIterations = (numBurnIn + numSamples) * control.treeThinningRate;
     
     // reserve once at the start if possible
     if (control.numThreads > 1 && control.numChains == 1)
-      ext_htm_reserveThreadsForSubTask(fit.threadManager, 0, 0);
+      misc_htm_reserveThreadsForSubTask(fit.threadManager, 0, 0);
     
     // const cast b/c yRescaled doesn't change, but probit latents do
     double* y = control.responseIsBinary ? chainScratch.probitLatents : const_cast<double*>(sharedScratch.yRescaled);
     
     for (size_t k = 0; k < totalNumIterations; ++k) {
       if (control.numThreads > 1 && control.numChains > 1)
-        ext_htm_reserveThreadsForSubTask(fit.threadManager, taskId, k);
+        misc_htm_reserveThreadsForSubTask(fit.threadManager, taskId, k);
       
       bool isThinningIteration = ((k + 1) % control.treeThinningRate != 0);
       size_t majorIterationNum = k / control.treeThinningRate;
@@ -943,12 +1203,12 @@ extern "C" {
             
       if (control.verbose && !isThinningIteration && (majorIterationNum + 1) % control.printEvery == 0) {
         if (control.numChains > 1)
-          ext_htm_printf(fit.threadManager, "[%lu] iteration: %u (of %u)\n", chainNum + 1, k + 1, totalNumIterations);
+          misc_htm_printf(fit.threadManager, "[%lu] iteration: %u (of %u)\n", chainNum + 1, k + 1, totalNumIterations);
         else
           ext_printf("iteration: %u (of %u)\n", k + 1, totalNumIterations);
       }
       
-      if (!isThinningIteration && data.numTestObservations > 0) ext_setVectorToConstant(chainScratch.totalTestFits, data.numTestObservations, 0.0);
+      if (!isThinningIteration && data.numTestObservations > 0) misc_setVectorToConstant(chainScratch.totalTestFits, data.numTestObservations, 0.0);
       
       for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
         double* oldTreeFits = state.treeFits + treeNum * data.numObservations;
@@ -956,21 +1216,21 @@ extern "C" {
         // treeY = y - (totalFits - oldTreeFits)
         // is residual from every *other* tree, so what is left for this tree to do
         std::memcpy(chainScratch.treeY, y, data.numObservations * sizeof(double));
-        ext_addVectorsInPlace(const_cast<const double*>(chainScratch.totalFits), data.numObservations, -1.0, chainScratch.treeY);
-        ext_addVectorsInPlace(const_cast<const double*>(oldTreeFits), data.numObservations, 1.0, chainScratch.treeY);
+        misc_addVectorsInPlace(const_cast<const double*>(chainScratch.totalFits), data.numObservations, -1.0, chainScratch.treeY);
+        misc_addVectorsInPlace(const_cast<const double*>(oldTreeFits), data.numObservations, 1.0, chainScratch.treeY);
         
         state.trees[treeNum].setNodeAverages(fit, chainNum, chainScratch.treeY);
         
         metropolisJumpForTree(fit, chainNum, state.trees[treeNum], chainScratch.treeY, state.sigma, &stepTaken, &ignored);
-                
-        state.trees[treeNum].sampleAveragesAndSetFits(fit, chainNum, state.sigma, currFits, isThinningIteration ? NULL : currTestFits);
+        
+        state.trees[treeNum].sampleParametersAndSetFits(fit, chainNum, state.sigma, currFits, isThinningIteration ? NULL : currTestFits);
         
         // totalFits += currFits - treeFits
-        ext_addVectorsInPlace(const_cast<const double*>(oldTreeFits), data.numObservations, -1.0, chainScratch.totalFits);
-        ext_addVectorsInPlace(const_cast<const double*>(currFits), data.numObservations, 1.0, chainScratch.totalFits);
+        misc_addVectorsInPlace(const_cast<const double*>(oldTreeFits), data.numObservations, -1.0, chainScratch.totalFits);
+        misc_addVectorsInPlace(const_cast<const double*>(currFits), data.numObservations, 1.0, chainScratch.totalFits);
         
         if (!isThinningIteration && data.numTestObservations > 0)
-          ext_addVectorsInPlace(const_cast<const double*>(currTestFits), data.numTestObservations, 1.0, chainScratch.totalTestFits);
+          misc_addVectorsInPlace(const_cast<const double*>(currTestFits), data.numTestObservations, 1.0, chainScratch.totalTestFits);
         
         std::memcpy(oldTreeFits, const_cast<const double*>(currFits), data.numObservations * sizeof(double));
       }
@@ -979,43 +1239,42 @@ extern "C" {
         size_t treeSampleNum = (fit.currentSampleNum + resultSampleNum) % fit.currentNumSamples;
         
         for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum)
-          state.savedTrees[treeNum + treeSampleNum * control.numTrees].copyFrom(fit, state.trees[treeNum]);
-        std::memcpy(state.savedTreeFits + treeSampleNum * control.numTrees * data.numObservations, const_cast<const double*>(state.treeFits), control.numTrees * data.numObservations * sizeof(double));
+          state.savedTrees[treeNum + treeSampleNum * control.numTrees].copyStructureFrom(fit, state.trees[treeNum], const_cast<const double*>(state.treeFits + treeNum * data.numObservations));
       }
       
-      if (control.responseIsBinary) {
+      if (control.responseIsBinary)
         sampleProbitLatentVariables(fit, state, chainScratch.totalFits, y);
-      } else {
-        double sumOfSquaredResiduals;
-        if (data.weights != NULL) {
-          sumOfSquaredResiduals = ext_htm_computeWeightedSumOfSquaredResiduals(fit.threadManager, taskId, y, data.numObservations, data.weights, chainScratch.totalFits);
-        } else {
-          sumOfSquaredResiduals = ext_htm_computeSumOfSquaredResiduals(fit.threadManager, taskId, y, data.numObservations, chainScratch.totalFits);
-        }
-        state.sigma = std::sqrt(model.sigmaSqPrior->drawFromPosterior(state.rng, static_cast<double>(data.numObservations), sumOfSquaredResiduals));
+      
+      state.sigma = std::sqrt(model.sigmaSqPrior->drawFromPosterior(fit, chainNum, y, chainScratch.totalFits));
+      if (model.kPrior != NULL) {
+        state.k = model.kPrior->drawFromPosterior(fit, chainNum);
+        model.muPrior->setK(fit, state.k);
       }
       
+            
       if (!isThinningIteration) {
         // if not out of burn-in, store result in first result; start
         // overwriting after that
         for (size_t j = 0; j < fit.data.numPredictors; ++j) variableCounts[j] = 0;
         countVariableUses(fit, state, variableCounts);
         
-        storeSamples(fit, chainNum, results, chainScratch.totalFits, chainScratch.totalTestFits, state.sigma, variableCounts, resultSampleNum);
-        
+        storeSamples(fit, chainNum, results, chainScratch.totalFits, chainScratch.totalTestFits, state.sigma,
+                     state.k, variableCounts, resultSampleNum);
+          
         if (control.callback != NULL) {
           size_t chainStride = chainNum * numSamples;
           control.callback(control.callbackData, fit, isBurningIn,
                            results.trainingSamples + (resultSampleNum + chainStride) * data.numObservations,
                            results.testSamples + (resultSampleNum + chainStride) * data.numTestObservations,
-                           results.sigmaSamples[resultSampleNum + chainStride]);
+                           results.sigmaSamples[resultSampleNum + chainStride],
+                           model.kPrior != NULL ? results.kSamples + resultSampleNum + chainStride : NULL);
         }
       }
     }
     
     delete [] currFits;
     if (data.numTestObservations > 0) delete [] currTestFits;
-    ext_stackFree(variableCounts);
+    misc_stackFree(variableCounts);
   }
 }
 
@@ -1065,9 +1324,9 @@ namespace dbarts {
         struct timespec outputDelay;
         outputDelay.tv_sec = 0;
         outputDelay.tv_nsec = 100000000; // every 0.1 seconds
-        ext_htm_runTopLevelTasksWithOutput(threadManager, &samplerThreadFunction, threadDataPtr, control.numChains, &outputDelay);
+        misc_htm_runTopLevelTasksWithOutput(threadManager, &samplerThreadFunction, threadDataPtr, control.numChains, &outputDelay);
       } else {
-        ext_htm_runTopLevelTasks(threadManager, &samplerThreadFunction, threadDataPtr, control.numChains);
+        misc_htm_runTopLevelTasks(threadManager, &samplerThreadFunction, threadDataPtr, control.numChains);
       }
       
       delete [] threadDataPtr;
@@ -1105,21 +1364,16 @@ namespace {
     else
       ext_printf("\nRunning BART with numeric y\n\n");
     
-    ext_printf("number of trees: %u\n", control.numTrees);
+    ext_printf("number of trees: %lu\n", control.numTrees);
+    ext_printf("number of chains: %lu, number of threads %lu\n", control.numChains, control.numThreads);
     
     ext_printf("Prior:\n");
     // dirty hack... should have priors print themselves
-    double sigma = std::sqrt(1.0 / static_cast<NormalPrior*>(model.muPrior)->precision);
-    double k = (control.responseIsBinary ? 3.0 : 0.5) /  (sigma * std::sqrt(static_cast<double>(control.numTrees)));
-    ext_printf("\tk: %f\n", k);
-    if (!control.responseIsBinary) {
-      ChiSquaredPrior* residPrior = static_cast<ChiSquaredPrior*>(model.sigmaSqPrior);
-      ext_printf("\tdegrees of freedom in sigma prior: %f\n", residPrior->degreesOfFreedom);
-      // double sigma = data.sigmaEstimate / sharedScratch.dataScale.range;
-      double quantile = 1.0 - ext_percentileOfChiSquared(residPrior->scale * residPrior->degreesOfFreedom / fit.state[0].sigma / fit.state[0].sigma, residPrior->degreesOfFreedom);
-      ext_printf("\tquantile in sigma prior: %f\n", quantile);
-      ext_printf("\tscale in sigma prior: %f\n", residPrior->scale);
-    }
+    ext_printf("\tk: %f\n", model.muPrior->getK(fit));
+    if (model.kPrior != NULL) model.kPrior->print(fit);
+    if (!control.responseIsBinary)
+      model.sigmaSqPrior->print(fit);
+    
     CGMPrior* treePrior = static_cast<CGMPrior*>(model.treePrior);
     ext_printf("\tpower and base for tree prior: %f %f\n", treePrior->power, treePrior->base);
     ext_printf("\tuse quantiles for rule cut points: %s\n", control.useQuantiles ? "true" : "false");
@@ -1135,7 +1389,7 @@ namespace {
     ext_printf("Cutoff rules c in x<=c vs x>c\n");
     ext_printf("Number of cutoffs: (var: number of possible c):\n");
     for (size_t j = 0; j < data.numPredictors; ++j) {
-      ext_printf("(%u: %u) ", j + 1, sharedScratch.numCutsPerVariable[j]);
+      ext_printf("(%u: %u) ", j + 1, fit.numCutsPerVariable[j]);
       if ((j + 1) % 5 == 0) ext_printf("\n");
     }
     ext_printf("\n");
@@ -1145,14 +1399,14 @@ namespace {
         ext_printf("x(%u) cutoffs: ", j + 1);
         
         size_t k;
-        for (k = 0; k < sharedScratch.numCutsPerVariable[j] - 1 && k < control.printCutoffs - 1; ++k) {
-          ext_printf("%f", sharedScratch.cutPoints[j][k]);
+        for (k = 0; k < fit.numCutsPerVariable[j] - 1 && k < control.printCutoffs - 1; ++k) {
+          ext_printf("%f", fit.cutPoints[j][k]);
           if ((k + 1) % 5 == 0) ext_printf("\n\t");
         }
-        if (k > 2 && k == control.printCutoffs && k < sharedScratch.numCutsPerVariable[j] - 1)
+        if (k > 2 && k == control.printCutoffs && k < fit.numCutsPerVariable[j] - 1)
           ext_printf("...");
         
-        ext_printf("%f", sharedScratch.cutPoints[j][sharedScratch.numCutsPerVariable[j] - 1]);
+        ext_printf("%f", fit.cutPoints[j][fit.numCutsPerVariable[j] - 1]);
         ext_printf("\n");
       }
     }
@@ -1191,7 +1445,7 @@ namespace {
     }
     ext_printf("\n");
     
-    uint32_t* variableCounts = ext_stackAllocate(fit.data.numPredictors, uint32_t);
+    uint32_t* variableCounts = misc_stackAllocate(fit.data.numPredictors, uint32_t);
     
     ext_printf("Variable Usage, last iteration (var:count):\n");
     for (size_t j = 0; j < fit.data.numPredictors; ++j) variableCounts[j] = 0;
@@ -1202,7 +1456,7 @@ namespace {
       if ((j + 1) % 5 == 0) ext_printf("\n");
     }
     
-    ext_stackFree(variableCounts);
+    misc_stackFree(variableCounts);
     
     ext_printf("\nDONE BART\n\n");
   }
@@ -1225,14 +1479,6 @@ namespace {
         chainScratch[chainNum].probitLatents = new double[data.numObservations];
     }
     
-    sharedScratch.xt = new double[data.numObservations * data.numPredictors];
-    ext_transposeMatrix(data.x, data.numObservations, data.numPredictors, const_cast<double*>(sharedScratch.xt));
-    
-    if (data.numTestObservations > 0) {
-      sharedScratch.xt_test = new double[data.numTestObservations * data.numPredictors];
-      ext_transposeMatrix(data.x_test, data.numTestObservations, data.numPredictors, const_cast<double*>(sharedScratch.xt_test));
-    }
-    
     // chain scratches
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
       chainScratch[chainNum].treeY = new double[data.numObservations];
@@ -1247,10 +1493,14 @@ namespace {
     }
     
     // shared scratch
-    sharedScratch.numCutsPerVariable = new uint32_t[data.numPredictors];
+    sharedScratch.x = new xint_t[data.numObservations * data.numPredictors];
+    if (data.numTestObservations > 0)
+      sharedScratch.xt_test = new xint_t[data.numTestObservations * data.numPredictors];
+    
+    fit.numCutsPerVariable = new uint32_t[data.numPredictors];
 
-    sharedScratch.cutPoints = new double*[data.numPredictors];
-    const double** cutPoints = const_cast<const double**>(sharedScratch.cutPoints);
+    fit.cutPoints = new double*[data.numPredictors];
+    const double** cutPoints = const_cast<const double**>(fit.cutPoints);
     for (size_t j = 0; j < data.numPredictors; ++j) cutPoints[j] = NULL;
     
     // states
@@ -1258,7 +1508,7 @@ namespace {
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
       new (fit.state + chainNum) State(control, data);
     
-    if (control.numThreads > 1 && ext_htm_create(&fit.threadManager, control.numThreads) != 0) {
+    if (control.numThreads > 1 && misc_htm_create(&fit.threadManager, control.numThreads) != 0) {
       ext_printMessage("Unable to multi-thread, defaulting to single.");
       control.numThreads = 1;
     }
@@ -1272,42 +1522,117 @@ namespace {
     State* state(fit.state);
     
     if (control.responseIsBinary) {
-      for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
+      for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
         state[chainNum].sigma = 1.0;
+        state[chainNum].k = model.kPrior != NULL ? model.muPrior->getK(fit) : std::numeric_limits<double>::quiet_NaN();
+      }
     } else {
-      for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
+      for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
         state[chainNum].sigma = data.sigmaEstimate / sharedScratch.dataScale.range;
+        state[chainNum].k = model.kPrior != NULL ? model.muPrior->getK(fit) : std::numeric_limits<double>::quiet_NaN();
+      }
       model.sigmaSqPrior->setScale(state[0].sigma * state[0].sigma * model.sigmaSqPrior->getScale());
     }
   }
   
   void setInitialCutPoints(BARTFit& fit) {
     Data& data(fit.data);
-    SharedScratch& sharedScratch(fit.sharedScratch);
     
-    uint32_t* numCutsPerVariable = const_cast<uint32_t*>(sharedScratch.numCutsPerVariable);
-    double** cutPoints = const_cast<double**>(sharedScratch.cutPoints);
+    uint32_t* numCutsPerVariable = const_cast<uint32_t*>(fit.numCutsPerVariable);
+    double** cutPoints = const_cast<double**>(fit.cutPoints);
     for (size_t i = 0; i < data.numPredictors; ++i) {
       numCutsPerVariable[i] = static_cast<uint32_t>(-1);
       cutPoints[i] = NULL;
     }
     
-    size_t* columns = ext_stackAllocate(data.numPredictors, size_t);
+    size_t* columns = misc_stackAllocate(data.numPredictors, size_t);
     for (size_t j = 0; j < data.numPredictors; ++j) columns[j] = j;
     
-    setCutPoints(fit, columns, data.numPredictors);
+    ::setCutPoints(fit, columns, data.numPredictors);
     
-    ext_stackFree(columns);
+    misc_stackFree(columns);
+  }
+  
+  void setXIntegerCutMap(BARTFit& fit)
+  {
+    const Data& data(fit.data);
+    
+    xint_t* x = const_cast<xint_t*>(fit.sharedScratch.x);
+    
+    for (size_t j = 0; j < data.numPredictors; ++j) {
+      for (size_t i = 0; i < data.numObservations; ++i) {
+        
+        xint_t k = 0;
+        
+        // min cut such that x_ij <= c_jk; can possibly be out of range if variable is on the far right
+        while (k < fit.numCutsPerVariable[j] &&
+               data.x[i + j * data.numObservations] > fit.cutPoints[j][k]) ++k;
+        
+        x[i + j * data.numObservations] = k;
+      }
+    }
+  }
+  
+  void setXIntegerCutMap(BARTFit& fit, const size_t* columns, size_t numColumns)
+  {
+    const Data& data(fit.data);
+    
+    xint_t* x = const_cast<xint_t*>(fit.sharedScratch.x);
+    
+    for (size_t j = 0; j < numColumns; ++j) {
+      size_t col = columns[j];
+      for (size_t i = 0; i < data.numObservations; ++i) {
+        xint_t k = 0;
+        while (k < fit.numCutsPerVariable[col] &&
+               data.x[i + col * data.numObservations] > fit.cutPoints[col][k]) ++k;
+        
+        x[i + col * data.numObservations] = k;
+      }
+    }
+  }
+  
+  void setXTestIntegerCutMap(const BARTFit& fit, const double* x_test, size_t numTestObservations, xint_t* xt_test)
+  {
+    const Data& data(fit.data);
+    
+    for (size_t j = 0; j < data.numPredictors; ++j) {
+      for (size_t i = 0; i < numTestObservations; ++i) {
+        xint_t k = 0;
+        
+        while (k < fit.numCutsPerVariable[j] &&
+               x_test[i + j * numTestObservations] > fit.cutPoints[j][k]) ++k;
+      
+        xt_test[i * data.numPredictors + j] = k;
+      }
+    }
+  }
+  
+  void setXTestIntegerCutMap(const BARTFit& fit, const double* x_test, size_t numTestObservations,
+                             xint_t* xt_test, const size_t* columns, size_t numColumns)
+  {
+    const Data& data(fit.data);
+    
+    for (size_t j = 0; j < numColumns; ++j) {
+      for (size_t i = 0; i < numTestObservations; ++i) {
+        size_t col = columns[j];
+        
+        xint_t k = 0;
+        
+        while (k < fit.numCutsPerVariable[col] &&
+               x_test[i + col * numTestObservations] > fit.cutPoints[col][k]) ++k;
+      
+        xt_test[i * data.numPredictors + col] = k;
+      }
+    }
   }
   
   void setCutPoints(BARTFit& fit, const size_t* columns, size_t numColumns)
   {
     Control& control(fit.control);
     Data& data(fit.data);
-    SharedScratch& sharedScratch(fit.sharedScratch);
     
-    uint32_t* numCutsPerVariable = const_cast<uint32_t*>(sharedScratch.numCutsPerVariable);
-    double** cutPoints = const_cast<double**>(sharedScratch.cutPoints);
+    uint32_t* numCutsPerVariable = const_cast<uint32_t*>(fit.numCutsPerVariable);
+    double** cutPoints = const_cast<double**>(fit.cutPoints);
         
     if (control.useQuantiles) {
       if (data.maxNumCuts == NULL) ext_throwError("Num cuts cannot be NULL if useQuantiles is true.");
@@ -1408,16 +1733,20 @@ namespace {
     size_t numSeedResets;
     size_t chainNum;
     const char* errorMessage = NULL;
+    
+    ext_rng_algorithm_t rng_algorithm = static_cast<ext_rng_algorithm_t>(control.rng_algorithm);
+    ext_rng_standardNormal_t rng_standardNormal = static_cast<ext_rng_standardNormal_t>(control.rng_standardNormal);
+    
     for (chainNum = 0; chainNum < control.numChains; ++chainNum) {
-      if (control.rng_algorithm == EXT_RNG_ALGORITHM_INVALID) { // use default of some kind
+      if (rng_algorithm == EXT_RNG_ALGORITHM_INVALID) { // use default of some kind
         if ((state[chainNum].rng = ext_rng_createDefault(useNativeRNG)) == NULL) {
           errorMessage = "could not allocate rng";
           goto createRNG_cleanup;
         }
         
-        if (control.rng_standardNormal != EXT_RNG_STANDARD_NORMAL_INVALID &&
-            control.rng_standardNormal != EXT_RNG_STANDARD_NORMAL_USER_NORM &&
-            ext_rng_setStandardNormalAlgorithm(state[chainNum].rng, control.rng_standardNormal, NULL) != 0) {
+        if (rng_standardNormal != EXT_RNG_STANDARD_NORMAL_INVALID &&
+            rng_standardNormal != EXT_RNG_STANDARD_NORMAL_USER_NORM &&
+            ext_rng_setStandardNormalAlgorithm(state[chainNum].rng, rng_standardNormal, NULL) != 0) {
           errorMessage = "could not set rng standard normal";
           goto createRNG_cleanup;
         }
@@ -1441,19 +1770,19 @@ namespace {
           }
         }
       } else {
-        if ((state[chainNum].rng = ext_rng_create(control.rng_algorithm, NULL)) == NULL) {
+        if ((state[chainNum].rng = ext_rng_create(rng_algorithm, NULL)) == NULL) {
           errorMessage = "could not allocate rng";
           goto createRNG_cleanup;
         }
         
-        if (control.rng_standardNormal != EXT_RNG_STANDARD_NORMAL_INVALID &&
-            control.rng_standardNormal != EXT_RNG_STANDARD_NORMAL_USER_NORM &&
-            ext_rng_setStandardNormalAlgorithm(state[chainNum].rng, control.rng_standardNormal, NULL) != 0) {
+        if (rng_standardNormal != EXT_RNG_STANDARD_NORMAL_INVALID &&
+            rng_standardNormal != EXT_RNG_STANDARD_NORMAL_USER_NORM &&
+            ext_rng_setStandardNormalAlgorithm(state[chainNum].rng, rng_standardNormal, NULL) != 0) {
           errorMessage = "could not set rng standard normal";
           goto createRNG_cleanup;
         }
         
-        if (control.rng_algorithm != EXT_RNG_ALGORITHM_USER_UNIFORM) {
+        if (rng_algorithm != EXT_RNG_ALGORITHM_USER_UNIFORM) {
           if (ext_rng_setSeedFromClock(state[chainNum].rng) != 0) { errorMessage = "could not seed rng"; goto createRNG_cleanup; }
           
           numSeedResets = 0;
@@ -1494,7 +1823,7 @@ namespace dbarts {
       if (uniformState != NULL && uniformState[chainNum] != NULL)
         ext_rng_setState(state[chainNum].rng, uniformState[chainNum]);
       if (normalState  != NULL && normalState[chainNum]  != NULL)
-        ext_rng_setStandardNormalAlgorithm(state[chainNum].rng, control.rng_standardNormal, normalState[chainNum]);
+        ext_rng_setStandardNormalAlgorithm(state[chainNum].rng, static_cast<ext_rng_standardNormal_t>(control.rng_standardNormal), normalState[chainNum]);
     }
   }
   
@@ -1515,10 +1844,10 @@ namespace {
     ChainScratch* chainScratch(fit.chainScratch);
     
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
-      ext_setVectorToConstant(chainScratch[chainNum].totalFits, data.numObservations, 0.0);
+      misc_setVectorToConstant(chainScratch[chainNum].totalFits, data.numObservations, 0.0);
       
       if (data.numTestObservations > 0)
-        ext_setVectorToConstant(chainScratch[chainNum].totalTestFits, data.numTestObservations, 0.0);
+        misc_setVectorToConstant(chainScratch[chainNum].totalTestFits, data.numTestObservations, 0.0);
     }
   }
   
@@ -1546,14 +1875,14 @@ namespace {
     
     // z = 2.0 * y - 1.0 - offset; so -1 if y == 0 and 1 if y == 1 when offset == 0
 #ifndef MATCH_BAYES_TREE
-    ext_setVectorToConstant(z, data.numObservations, -1.0);
-    if (data.offset != NULL) ext_addVectorsInPlace(data.offset, data.numObservations, -1.0, z);
-    ext_addVectorsInPlace(data.y, data.numObservations, 2.0, z);
+    misc_setVectorToConstant(z, data.numObservations, -1.0);
+    if (data.offset != NULL) misc_addVectorsInPlace(data.offset, data.numObservations, -1.0, z);
+    misc_addVectorsInPlace(data.y, data.numObservations, 2.0, z);
 #else
     // BayesTree initialized the latents to be -2 and 0; was probably a bug
-    ext_setVectorToConstant(z, data.numObservations, -2.0);
-    if (data.offset != NULL) ext_addVectorsInPlace(data.offset, data.numObservations, -1.0, z);
-    ext_addVectorsInPlace(data.y, data.numObservations, 2.0, z);
+    misc_setVectorToConstant(z, data.numObservations, -2.0);
+    if (data.offset != NULL) misc_addVectorsInPlace(data.offset, data.numObservations, -1.0, z);
+    misc_addVectorsInPlace(data.y, data.numObservations, 2.0, z);
 #endif
   }
   
@@ -1564,7 +1893,7 @@ namespace {
     double* yRescaled = const_cast<double*>(fit.sharedScratch.yRescaled);
     
     if (data.offset != NULL) {
-      ext_addVectors(data.offset, data.numObservations, -1.0, data.y, yRescaled);
+      misc_addVectors(data.offset, data.numObservations, -1.0, data.y, yRescaled);
     } else {
       std::memcpy(yRescaled, data.y, data.numObservations * sizeof(double));
     }
@@ -1579,9 +1908,9 @@ namespace {
     if (sharedScratch.dataScale.max == sharedScratch.dataScale.min) sharedScratch.dataScale.range = 1.0;
     
     // yRescaled = (y - offset - min) / (max - min) - 0.5
-    ext_addScalarToVectorInPlace(   yRescaled, data.numObservations, -sharedScratch.dataScale.min);
-    ext_scalarMultiplyVectorInPlace(yRescaled, data.numObservations, 1.0 / sharedScratch.dataScale.range);
-    ext_addScalarToVectorInPlace(   yRescaled, data.numObservations, -0.5);
+    misc_addScalarToVectorInPlace(   yRescaled, data.numObservations, -sharedScratch.dataScale.min);
+    misc_scalarMultiplyVectorInPlace(yRescaled, data.numObservations, 1.0 / sharedScratch.dataScale.range);
+    misc_addScalarToVectorInPlace(   yRescaled, data.numObservations, -0.5);
   }
   
   // multithread-this!
@@ -1619,10 +1948,11 @@ namespace {
   
   void storeSamples(const BARTFit& fit, size_t chainNum, Results& results,
                     const double* trainingSample, const double* testSample,
-                    double sigma, const uint32_t* variableCounts, size_t simNum)
+                    double sigma, double k, const uint32_t* variableCounts, size_t simNum)
   {
     const Data& data(fit.data);
     const Control& control(fit.control);
+    const Model& model(fit.model);
     const SharedScratch& sharedScratch(fit.sharedScratch);
     
     size_t chainStride = chainNum * results.numSamples;
@@ -1630,35 +1960,37 @@ namespace {
       if (control.keepTrainingFits) {
         double* trainingSamples = results.trainingSamples + (simNum + chainStride) * data.numObservations;
         std::memcpy(trainingSamples, trainingSample, data.numObservations * sizeof(double));
-        if (data.offset != NULL) ext_addVectorsInPlace(data.offset, data.numObservations, 1.0, trainingSamples);
+        if (data.offset != NULL) misc_addVectorsInPlace(data.offset, data.numObservations, 1.0, trainingSamples);
       }
       
       if (data.numTestObservations > 0) {
         double* testSamples = results.testSamples + (simNum + chainStride) * data.numTestObservations;
         std::memcpy(testSamples, testSample, data.numTestObservations * sizeof(double));
-        if (data.testOffset != NULL) ext_addVectorsInPlace(data.testOffset, data.numTestObservations, 1.0, testSamples);
+        if (data.testOffset != NULL) misc_addVectorsInPlace(data.testOffset, data.numTestObservations, 1.0, testSamples);
       }
       
       results.sigmaSamples[simNum + chainStride] = 1.0;
-      
     } else {
       if (control.keepTrainingFits) {
         double* trainingSamples = results.trainingSamples + (simNum + chainStride) * data.numObservations;
         // set training to dataScale.range * (totalFits + 0.5) + dataScale.min + offset
-        ext_setVectorToConstant(trainingSamples, data.numObservations, sharedScratch.dataScale.range * 0.5 + sharedScratch.dataScale.min);
-        ext_addVectorsInPlace(trainingSample, data.numObservations, sharedScratch.dataScale.range, trainingSamples);
-        if (data.offset != NULL) ext_addVectorsInPlace(data.offset, data.numObservations, 1.0, trainingSamples);
+        misc_setVectorToConstant(trainingSamples, data.numObservations, sharedScratch.dataScale.range * 0.5 + sharedScratch.dataScale.min);
+        misc_addVectorsInPlace(trainingSample, data.numObservations, sharedScratch.dataScale.range, trainingSamples);
+        if (data.offset != NULL) misc_addVectorsInPlace(data.offset, data.numObservations, 1.0, trainingSamples);
       }
       
       if (data.numTestObservations > 0) {
         double* testSamples = results.testSamples + (simNum + chainStride) * data.numTestObservations;
-        ext_setVectorToConstant(testSamples, data.numTestObservations, sharedScratch.dataScale.range * 0.5 + sharedScratch.dataScale.min);
-        ext_addVectorsInPlace(testSample, data.numTestObservations, sharedScratch.dataScale.range, testSamples);
-        if (data.testOffset != NULL) ext_addVectorsInPlace(data.testOffset, data.numTestObservations, 1.0, testSamples);
+        misc_setVectorToConstant(testSamples, data.numTestObservations, sharedScratch.dataScale.range * 0.5 + sharedScratch.dataScale.min);
+        misc_addVectorsInPlace(testSample, data.numTestObservations, sharedScratch.dataScale.range, testSamples);
+        if (data.testOffset != NULL) misc_addVectorsInPlace(data.testOffset, data.numTestObservations, 1.0, testSamples);
       }
        
       results.sigmaSamples[simNum + chainStride] = sigma * sharedScratch.dataScale.range;
     }
+    
+    if (model.kPrior != NULL)
+      results.kSamples[simNum + chainStride] = k;
     
     double* variableCountSamples = results.variableCountSamples + (simNum + chainStride) * data.numPredictors;
     for (size_t j = 0; j < data.numPredictors; ++j) variableCountSamples[j] = static_cast<double>(variableCounts[j]);
@@ -1680,141 +2012,3 @@ namespace {
 #endif
 }
 
-#include <external/binaryIO.h>
-#include <sys/stat.h> // permissions
-#include <fcntl.h>    // open flags
-#include <unistd.h>   // unlink
-#include "binaryIO.hpp"
-
-#ifndef S_IRGRP
-#define S_IRGRP 0
-#endif
-#ifndef S_IROTH
-#define S_IROTH 0
-#endif
-
-#define FILE_VERSION_STRING_LENGTH 8
-#define FILE_VERSION_STRING "00.09.02"
-
-namespace dbarts {
-  
-  bool BARTFit::saveToFile(const char* fileName) const
-  {
-    ext_binaryIO bio;
-    int errorCode = ext_bio_initialize(&bio, fileName, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    
-    
-    if (errorCode != 0) {
-      ext_issueWarning("unable to open file: %s", std::strerror(errorCode));
-      
-      return false;
-    }
-    
-    // because of a peculiarity of how this gets mucked around on creation, this is necessary
-    double scaleFactor = control.responseIsBinary ? 1.0 : (data.sigmaEstimate / sharedScratch.dataScale.range);
-    double originalScale = model.sigmaSqPrior->getScale();
-    model.sigmaSqPrior->setScale(originalScale / (scaleFactor * scaleFactor));
-    
-    if (ext_bio_writeNChars(&bio, FILE_VERSION_STRING, FILE_VERSION_STRING_LENGTH) != 0) goto save_failed;
-    
-    if (ext_bio_writeSizeType(&bio, currentNumSamples) != 0) goto save_failed;
-    
-    if (writeControl(&bio, control) == false) goto save_failed;
-    ext_printf("wrote control\n");
-    if (writeModel(&bio, model) == false) goto save_failed;
-    ext_printf("wrote model\n");
-    if (writeData(&bio, data) == false) goto save_failed;
-    ext_printf("wrote model\n");
-    
-    if (writeState(&bio, state, control, data, currentNumSamples) == false) goto save_failed;
-    ext_printf("wrote state\n");
-    
-    if (ext_bio_writeDouble(&bio, runningTime) != 0) goto save_failed;
-    
-    ext_bio_invalidate(&bio);
-    
-    model.sigmaSqPrior->setScale(originalScale);
-    
-    printTerminalSummary(*this);
-    
-    return true;
-    
-save_failed:
-    ext_bio_invalidate(&bio);
-    model.sigmaSqPrior->setScale(originalScale);
-    unlink(fileName);
-    return false; 
-  }
-  
-  
-  BARTFit* BARTFit::loadFromFile(const char* fileName) {
-    ext_binaryIO bio;
-    int errorCode = ext_bio_initialize(&bio, fileName, O_RDONLY, 0);
-    if (errorCode != 0) {
-      ext_issueWarning("unable to open file: %s", std::strerror(errorCode));
-      return NULL;
-    }
-    
-    Version version;
-    char* versionString = NULL;
-    if ((errorCode = readVersion(&bio, version, &versionString)) != 0) {
-      ext_issueWarning("unable to parse version string '%s': %s", versionString, std::strerror(errorCode));
-      delete [] versionString;
-      return NULL;
-    }
-    size_t currentNumSamples;
-    size_t currentSampleNum;
-        
-    Control control;
-    Model model;
-    Data data;
-    BARTFit* result = NULL;
-    
-    if ((errorCode = ext_bio_readSizeType(&bio, &currentNumSamples)) != 0) goto load_failed;
-    if ((errorCode = ext_bio_readSizeType(&bio, &currentSampleNum)) != 0) goto load_failed;
-    
-    if (readControl(&bio, control, version) == false) goto load_failed;
-    ext_printf("read control\n");
-    if (readModel(&bio, model) == false) goto load_failed;
-    ext_printf("read model\n");
-    if (readData(&bio, data) == false) goto load_failed;
-    ext_printf("read data\n");
-    
-    result = new BARTFit(control, model, data);
-    
-    if (readState(&bio, result->state, result->control, result->data, currentNumSamples, version) == false) goto load_failed;
-    ext_printf("read state\n");
-    
-    // version 00.08.00 stored running time in state, but it was at the very end so this will work on
-    // old objects and new ones
-    if ((errorCode = ext_bio_readDouble(&bio, &result->runningTime)) != 0) goto load_failed;
-    result->currentNumSamples = currentNumSamples;
-    result->currentSampleNum = currentSampleNum;
-    
-    ext_bio_invalidate(&bio);
-    
-    printTerminalSummary(*result);
-    
-    return result;
-    
-load_failed:
-    ext_bio_invalidate(&bio);
-    
-    delete result;
-    
-    delete [] data.maxNumCuts;
-    delete [] data.variableTypes;
-    delete [] data.testOffset;
-    delete [] data.offset;
-    delete [] data.weights;
-    delete [] data.x_test;
-    delete [] data.x;
-    delete [] data.y;
-    
-    delete model.sigmaSqPrior;
-    delete model.muPrior;
-    delete model.treePrior;
-    
-    return NULL;
-  }
-}

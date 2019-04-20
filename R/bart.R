@@ -59,24 +59,27 @@ packageBartResults <- function(fit, samples, burnInSigma, combineChains)
   
   if (fit$control@keepTrees)
     result$fit <- fit
+  if (!is.null(samples[["k"]])) result[["k"]] <- packageSamples(n.chains, combineChains, samples[["k"]])
   
   class(result) <- 'bart'
   invisible(result)
 }
 
+.kDefault <- quote(if (control@binary) quote(chi(1.25, Inf)) else 2)
+
 bart2 <- function(
   formula, data, test, subset, weights, offset, offset.test = offset,
   sigest = NA_real_, sigdf = 3.0, sigquant = 0.90,
-  k = 2.0,
+  k = NULL,
   power = 2.0, base = 0.95,
   n.trees = 75L,
   n.samples = 500L, n.burn = 500L,
   n.chains = 4L, n.threads = min(guessNumCores(), n.chains), combineChains = FALSE,
-  n.cuts = 100L, useQuantiles = TRUE,
+  n.cuts = 100L, useQuantiles = FALSE,
   n.thin = 1L, keepTrainingFits = TRUE,
   printEvery = 100L, printCutoffs = 0L,
-  verbose = TRUE,
-  keepTrees = FALSE, keepCall = TRUE, ...
+  verbose = TRUE, keepTrees = FALSE, keepCall = TRUE,
+  samplerOnly = FALSE, ...
 )
 {
   matchedCall <- match.call()
@@ -88,6 +91,12 @@ bart2 <- function(
     stop("unknown arguments: '", paste0(argNames[unknownArgs], collapse = "', '"), "'")
   
   controlCall <- redirectCall(matchedCall, dbarts::dbartsControl)
+  missingDefaultArgs <- names(formals(bart2))[names(formals(bart2)) %in% names(formals(dbarts::dbartsControl)) &
+                                              names(formals(bart2)) %not_in% names(matchedCall)]
+  if (length(missingDefaultArgs) > 0L) {
+    currentEnv <- sys.frame(sys.nframe())
+    controlCall[missingDefaultArgs] <- lapply(formals(bart2)[missingDefaultArgs], eval, envir = currentEnv)
+  }
   control <- eval(controlCall, envir = callingEnv)
   
   control@call <- if (keepCall) matchedCall else call("NULL")
@@ -99,22 +108,27 @@ bart2 <- function(
   
   tree.prior <- quote(cgm(power, base))
   tree.prior[[2L]] <- power; tree.prior[[3L]] <- base
-
-  node.prior <- quote(normal(k))
-  node.prior[[2L]] <- k
-
+  
+  if (!is.null(matchedCall[["k"]])) {
+    node.prior <- quote(normal(k))
+    node.prior[[2L]] <- matchedCall[["k"]]
+  } else {
+    node.prior <- NULL
+  }
+  
   resid.prior <- quote(chisq(sigdf, sigquant))
   resid.prior[[2L]] <- sigdf; resid.prior[[3L]] <- sigquant
   
   samplerCall <- redirectCall(matchedCall, dbarts::dbarts)
   samplerCall$control <- control
   samplerCall$n.samples <- NULL
-  samplerCall$tree.prior = tree.prior
-  samplerCall$node.prior = node.prior
-  samplerCall$resid.prior = resid.prior
+  samplerCall$tree.prior <- tree.prior
+  samplerCall$node.prior <- node.prior
+  samplerCall$resid.prior <- resid.prior
   samplerCall$sigma <- as.numeric(sigest)
   
   sampler <- eval(samplerCall, envir = callingEnv)
+  if (samplerOnly == TRUE) return(sampler)
   
   control <- sampler$control
   
@@ -128,14 +142,14 @@ bart2 <- function(
     oldKeepTrainingFits <- control@keepTrainingFits
     oldVerbose <- control@verbose
 
-    if (length(oldX.test) > 0) sampler$setTestPredictorAndOffset(NULL, NULL, updateState = FALSE)
+    if (length(oldX.test) > 0) sampler$setTestPredictorAndOffset(NULL, NULL)
     control@keepTrainingFits <- FALSE
     control@verbose <- FALSE
     sampler$setControl(control)
 
     burnInSigma <- sampler$run(0L, control@n.burn, FALSE)$sigma
     
-    if (length(oldX.test) > 0) sampler$setTestPredictorAndOffset(oldX.test, oldOffset.test, updateState = FALSE)
+    if (length(oldX.test) > 0) sampler$setTestPredictorAndOffset(oldX.test, oldOffset.test)
     control@keepTrainingFits <- oldKeepTrainingFits
     control@verbose <- oldVerbose
     if (keepTrees == TRUE) control@keepTrees <- TRUE
@@ -162,8 +176,7 @@ bart <- function(
   printevery = 100L, keepevery = 1L, keeptrainfits = TRUE,
   usequants = FALSE, numcut = 100L, printcutoffs = 0L,
   verbose = TRUE, nchain = 1L, nthread = 1L, combinechains = TRUE,
-  keeptrees = FALSE,
-  keepcall = TRUE
+  keeptrees = FALSE, keepcall = TRUE, sampleronly = FALSE
 )
 {
   control <- dbartsControl(keepTrainingFits = as.logical(keeptrainfits), useQuantiles = as.logical(usequants),
@@ -184,7 +197,7 @@ bart <- function(
   tree.prior[[2L]] <- power; tree.prior[[3L]] <- base
 
   node.prior <- quote(normal(k))
-  node.prior[[2L]] <- k
+  node.prior[[2L]] <- if (!is.null(matchedCall[["k"]])) matchedCall[["k"]] else k
 
   resid.prior <- quote(chisq(sigdf, sigquant))
   resid.prior[[2L]] <- sigdf; resid.prior[[3L]] <- sigquant
@@ -194,7 +207,9 @@ bart <- function(
                tree.prior = tree.prior, node.prior = node.prior,
                resid.prior = resid.prior, control = control, sigma = as.numeric(sigest))
   sampler <- do.call(dbarts::dbarts, args, envir = parent.frame(1L))
-
+  
+  if (sampleronly) return(sampler)
+  
   control <- sampler$control
   
   burnInSigma <- NULL
@@ -205,14 +220,14 @@ bart <- function(
     oldKeepTrainingFits <- control@keepTrainingFits
     oldVerbose <- control@verbose
 
-    if (length(x.test) > 0) sampler$setTestPredictorAndOffset(NULL, NULL, updateState = FALSE)
+    if (length(x.test) > 0) sampler$setTestPredictorAndOffset(NULL, NULL)
     control@keepTrainingFits <- FALSE
     control@verbose <- FALSE
     sampler$setControl(control)
 
     burnInSigma <- sampler$run(0L, control@n.burn, FALSE)$sigma
     
-    if (length(x.test) > 0) sampler$setTestPredictorAndOffset(oldX.test, oldOffset.test, updateState = FALSE)
+    if (length(x.test) > 0) sampler$setTestPredictorAndOffset(oldX.test, oldOffset.test)
     control@keepTrainingFits <- oldKeepTrainingFits
     control@verbose <- oldVerbose
     if (keeptrees == TRUE) control@keepTrees <- TRUE

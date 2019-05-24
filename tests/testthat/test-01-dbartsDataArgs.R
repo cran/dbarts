@@ -1,6 +1,6 @@
 context("dbarts data arguments")
 
-source(system.file("common", "friedmanData.R", package = "dbarts"))
+source(system.file("common", "friedmanData.R", package = "dbarts"), local = TRUE)
 
 test_that("formula specification raises errors", {
   expect_error(dbartsData("not-a-formula", testData))
@@ -102,15 +102,13 @@ test_that("test argument creates valid objects", {
   expect_is(dbartsData(y ~ x, testData, testData$x[11:20,]), "dbartsData")
 })
 
-## rm(testData)
-
-source(system.file("common", "probitData.R", package = "dbarts"))
+source(system.file("common", "probitData.R", package = "dbarts"), local = TRUE)
 
 test_that("test offset fills in control logicals depending on specification", {
   data <- dbartsData(Z ~ X, testData, testData$X)
   
-  expect_that(data@offset,      is_null())
-  expect_that(data@offset.test, is_null())
+  expect_null(data@offset)
+  expect_null(data@offset.test)
   expect_that(data@testUsesRegularOffset, equals(NA))
 
   
@@ -132,7 +130,7 @@ test_that("test offset fills in control logicals depending on specification", {
   data <- dbartsData(Z ~ X, testData, testData$X, offset = 0.2, offset.test = NULL)
 
   expect_that(data@offset[1:5], equals(rep(0.2, 5)))
-  expect_that(data@offset.test, is_null())
+  expect_null(data@offset.test)
   expect_that(data@testUsesRegularOffset, equals(FALSE))
   
 
@@ -171,7 +169,7 @@ test_that("test offset fills in control logicals depending on specification", {
   data <- dbartsData(Z ~ X, testData, testData$X, offset = otherOffset, offset.test = NULL)
   
   expect_that(data@offset[1:5], equals(otherOffset[1:5]))
-  expect_that(data@offset.test, is_null())
+  expect_null(data@offset.test)
   expect_that(data@testUsesRegularOffset, equals(FALSE))
 
 
@@ -198,12 +196,12 @@ test_that("test offset fills in control logicals depending on specification", {
   
   data <- dbartsData(Z ~ X, testData, testData$X, offset = NULL, offset.test = otherOffset)
   
-  expect_that(data@offset,           is_null())
+  expect_null(data@offset)
   expect_that(data@offset.test[1:5], equals(otherOffset[1:5]))
   expect_that(data@testUsesRegularOffset, equals(FALSE))
 })
 
-source(system.file("common", "almostLinearBinaryData.R", package = "dbarts"))
+source(system.file("common", "almostLinearBinaryData.R", package = "dbarts"), local = TRUE)
 
 test_that("bart creates viable sampler with formula, data specification", {
   data <- data.frame(y = testData$y, x = testData$x)

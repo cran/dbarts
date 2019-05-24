@@ -1,9 +1,18 @@
 context("rbart")
 
-source(system.file("common", "friedmanData.R", package = "dbarts"))
+source(system.file("common", "friedmanData.R", package = "dbarts"), local = TRUE)
 
 n.g <- 5L
+if (getRversion() >= "3.6.0") {
+  oldSampleKind <- RNGkind()[3L]
+  suppressWarnings(RNGkind(sample.kind = "Rounding"))
+}
 g <- sample(n.g, length(testData$y), replace = TRUE)
+if (getRversion() >= "3.6.0") {
+  suppressWarnings(RNGkind(sample.kind = oldSampleKind))
+  rm(oldSampleKind)
+}
+
 sigma.b <- 1.5
 b <- rnorm(n.g, 0, sigma.b)
 
@@ -75,6 +84,21 @@ test_that("rbart runs example", {
   expect_true(length(unique(rbartFit$ranef)) > 1L)
 })
 
+test_that("rbart passes regression test", {
+  df <- as.data.frame(testData$x)
+  colnames(df) <- paste0("x_", seq_len(ncol(testData$x)))
+  df$y <- testData$y
+  df$g <- testData$g
+  
+  set.seed(99)
+  rbartFit <- rbart_vi(y ~ . - g, df, group.by = g,
+                       n.samples = 1L, n.burn = 5L, n.thin = 1L, n.chains = 1L,
+                       n.trees = 25L, n.threads = 1L)
+  
+  expect_equal(as.numeric(rbartFit$ranef),
+               c(0.548756620200975, 1.98489377073739, -0.123942881873723, -0.643642914323586, 3.02981874312062))
+})
+
 test_that("rbart compares favorably to lmer for nonlinear models", {
   skip_if_not_installed("lme4")
   lme4 <- asNamespace("lme4")
@@ -106,13 +130,34 @@ test_that("rbart compares favorably to lmer for nonlinear models", {
   
   
   rbartFit <- rbart_vi(y ~ . - g, df, group.by = g,
-                       n.samples = 600L, n.burn = 300L, n.thin = 2L, n.chains = 2L,
+                       n.samples = 200L, n.burn = 100L, n.thin = 2L, n.chains = 2L,
                        n.trees = 50L, n.threads = 1L)
   ranef.rbart <- rbartFit$ranef.mean
   
-  lmerFit <- lme4$lmer(y ~ . - g + (1 | g), df)
+  lmerFit <- suppressWarnings(lme4$lmer(y ~ . - g + (1 | g), df))
   ranef.lmer <- lme4$ranef.merMod(lmerFit)[[1L]][[1L]]
   
-  expect_true(mean((b - ranef.rbart)^2) < mean((b - ranef.lmer)^2))
+  expect_true(sqrt(mean((b - ranef.rbart)^2)) < sqrt(mean((b - ranef.lmer)^2)))
+  
+  
+  rho <- 0.4
+  p.y <- pnorm((Ey - mean(Ey)) / sd(Ey) + rho * .75 * b[g])
+  set.seed(99)
+  y <- rbinom(n, 1L, p.y)
+  df <- as.data.frame(x)
+  colnames(df) <- paste0("x_", seq_len(ncol(x)))
+  df$y <- y
+  df$g <- g
+  
+  rbartFit <- rbart_vi(y ~ . - g, df, group.by = g,
+                       n.samples = 240L, n.burn = 120L, n.thin = 3L, n.chains = 2L,
+                       n.trees = 50L, n.threads = 1L)
+  ranef.rbart <- rbartFit$ranef.mean
+  
+  glmerFit <- lme4$glmer(y ~ . - g + (1 | g), df, family = binomial(link = probit))
+  
+  rbart.mu.hat <- apply(rbartFit$yhat.train, 3, mean)
+  glmer.mu.hat  <- predict(glmerFit)
+  expect_true(sqrt(mean((rbart.mu.hat - Ey)^2)) < sqrt(mean((glmer.mu.hat - Ey)^2)))
 })
 

@@ -26,6 +26,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+// original at https://github.com/armon/libart
+
 // Portability note: this was originally designed around the assumption that chars
 // are 8 bits, and hence I've forced it to take uint8_ts instead. If this were to
 // change, one could go through in the innards and use different node sizes,
@@ -63,13 +65,13 @@ inline misc_size_t misc_art_getSize(const misc_art_tree* t) {
 #endif
 
 // returns the value that got overwritten, if any exists; otherwise NULL
-// if NULL, errno may have been set
+// if NULL, errno will have been set, check for error
 void* misc_art_insert(misc_art_tree* restrict t, const uint8_t* restrict key, misc_size_t keyLength, const void* restrict value);
 // returns the value that got deleted, if any exists; otherwise NULL
-// if NULL, errno may have been set
+// if NULL, errno will have been set, check for error
 void* misc_art_delete(misc_art_tree* restrict t, const uint8_t* restrict key, misc_size_t keyLength);
 // returns the value found, if any exists; otherwise NULL
-// if NULL, errno may have been set
+// if NULL, errno will have been set, check for error
 void* misc_art_search(const misc_art_tree* restrict t, const uint8_t* restrict key, misc_size_t keyLength);
 
 typedef int (*misc_art_callback)(void* restrict data, const uint8_t* restrict key, misc_size_t keyLength, void* restrict value);

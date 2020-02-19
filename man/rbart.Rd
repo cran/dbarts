@@ -1,6 +1,8 @@
 \name{rbart}
 \alias{rbart_vi}
 \alias{plot.rbart}
+\alias{fitted.rbart}
+\alias{extract.rbart}
 \alias{predict.rbart}
 \title{Bayesian Additive Regression Trees with Random Effects}
 \description{
@@ -9,7 +11,7 @@ Fits a varying intercept/random effect BART model.
 \usage{
 rbart_vi(
   formula, data, test, subset, weights, offset, offset.test = offset,
-  group.by, prior = cauchy,
+  group.by, group.by.test, prior = cauchy,
   sigest = NA_real_, sigdf = 3.0, sigquant = 0.90,
   k = 2.0,
   power = 2.0, base = 0.95,
@@ -20,14 +22,30 @@ rbart_vi(
   n.thin = 5L, keepTrainingFits = TRUE,
   printEvery = 100L, printCutoffs = 0L,
   verbose = TRUE,
-  keepTrees = TRUE, keepCall = TRUE, ...)
+  keepTrees = TRUE, keepCall = TRUE, \dots)
 
-\method{plot}{rbart}(x, plquants = c(0.05, 0.95), cols = c('blue', 'black'), \dots)
-\method{predict}{rbart}(object, test, group.by, offset.test, combineChains, \dots)
+\S3method{plot}{rbart}(x, plquants = c(0.05, 0.95), cols = c('blue', 'black'), \dots)
+\S3method{fitted}{rbart}(object,
+                         type = c("ev", "ppd", "bart", "ranef"),
+                         sample = c("train", "test"),
+                         combineChains = TRUE,
+                         \dots)
+\S3method{extract}{rbart}(object,
+                          type = c("ev", "ppd", "bart", "ranef"),
+                          sample = c("train", "test"),
+                          combineChains = TRUE,
+                          \dots)
+\S3method{predict}{rbart}(object, newdata, group.by, offset,
+                          type = c("ev", "ppd", "bart", "ranef"),
+                          combineChains = TRUE,
+                          \dots)
 }
 \arguments{
   \item{group.by}{
     Grouping factor. Can be an integer vector/factor, or a reference to such in \code{data}.
+  }
+  \item{group.by.test}{
+    Grouping factor for test data, of the same type as \code{group.by}. Can be missing.
   }
   \item{prior}{
     A function or symbolic reference to built-in priors. Determines the prior over the standard deviation of 
@@ -45,7 +63,17 @@ rbart_vi(
         n.cuts, useQuantiles, keepTrainingFits, printEvery, printCutoffs, verbose,
         keepTrees, keepCall, \dots}{
     Same as in \code{\link{bart2}}.}
-  \item{object}{Same as in \code{\link{predict.bart}}.}
+  \item{object}{A fitted \code{rbart} model.}
+  \item{newdata}{Same as \code{test}, but named to match \code{\link{predict}} generic.}
+  \item{type}{One of \code{"ev"}, \code{"ppd"}, \code{"bart"}, \code{"ranef"} for
+        the posterior of the expected value, posterior predictive distribution, non-parametric/BART
+        component, or random effect respectively. The expected value is the sum of the BART component
+        and the random effects, while the posterior predictive distribution is a response sampled
+        with that mean. To synergize with \code{\link{predict.glm}}, \code{"response"} can
+        be used as a synonym for \code{"value"} and \code{"link"} can be used as a synonym for
+        \code{"bart"}.}
+  \item{sample}{One of \code{"train"} or \code{"test"}, referring to the training or tests samples
+        respectively.}
   \item{x, plquants, cols}{Same as in \code{\link{plot.bart}}.}
 }
 \details{
@@ -57,8 +85,18 @@ rbart_vi(
 }
 
 For binary outcomes the response model is changed to \eqn{P(Y_i = 1) = \Phi(f(x_i) + \alpha_{g[i]})}. \eqn{i} indexes observations, \eqn{g[i]} is the group index of observation \eqn{i}, \eqn{f(x)} and
-  \eqn{\sigma_y} come from a BART model, and \eqn{\alpha_j} are the independent and identically distributed
-  random intercepts.
+  \eqn{\sigma_y} come from a BART model, and \eqn{\alpha_j} are the independent and identically distributed random intercepts.
+
+\subsection{Out Of Sample Groups}{
+  Predicting random effects for groups not in the training sample is supported by sampling
+  from their posterior predictive distribution, that is a draw is taken from
+  \eqn{p(\alpha \mid y) = \int p(\alpha \mid \tau)p(\tau \mid y)d\alpha}.
+  For out-of-sample groups in the test data, these random effect draws can be kept 
+  with the saved object. For those supplied to \code{predict}, they cannot and may
+  change for subsequent calls.}
+\subsection{Generics}{
+  See the generics section of \code{\link{bart}}.
+}
 }
 \value{
   An object of class \code{rbart}. Contains all of the same elements of an object of class \code{\link{bart}},

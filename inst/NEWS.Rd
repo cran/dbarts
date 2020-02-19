@@ -1,11 +1,69 @@
 \name{NEWS}
 \title{dbarts News}
 \encoding{UTF-8}
-\section{CHANGES IN VERSION 0.9-12}{
+\section{CHANGES IN VERSION 0.9-16}{
+  \subsection{NEW FEATURES}{
+    \itemize{
+      \item Added \code{extract} and \code{fitted} generics for \code{bart}
+            models. Respects \code{"train"} and \code{"test"} sets of
+            observations while returning \code{"ev"} - samples from the
+            posterior of the individual level expected value, \code{"bart"}
+            - the sum of trees component; same as \code{"ev"} for linear
+            models but on the probit scale for binary ones, and \code{"ppd"}
+            - samples from the posterior predictive distribution. To synergize
+            with \code{fitted.glm}, \code{"response"} can be used as a synonym
+            for \code{"ev"} and \code{"link"} can be used as a synonym for
+            \code{"bart"}.
+    }
+  }
+  \subsection{USER-VISIBLE CHANGES}{
+    \itemize{
+      \item \code{predict} for \code{bart} models with binary outcomes returns
+            a result on the probability scale, not probit. The argument
+            \code{value} is deprecated - use \code{type} instead.
+      \item \code{predict} further conforms to the same system of arguments as
+            \code{extract} and \code{fitted}.
+    }
+  }
+  \subsection{BUG-FIXES}{
+    \itemize{
+      \item \code{xbart} with a k-hyperprior should no longer crash. Report thanks to Colin Carlson.
+    }
+  }
+}
+\section{CHANGES IN VERSION 0.9-14}{
+  \subsection{NEW FEATURES}{
+    \itemize{
+      \item Fits from \code{rbart_vi} now work with generics \code{fitted},
+            \code{extract}, and \code{predict}. \code{extract} retrieves
+            samples from the posterior distribution for the training and test
+            samples, \code{fitted} applies averages across those samples,
+            while \code{predict} can be used to obtain values for completely
+            new observations.
+    }
+  }
+  \subsection{USER-VISIBLE CHANGES}{
+    \itemize{
+      \item \code{predict} for \code{rbart_vi} takes value "ev" instead of "post-mean"
+            to clarify what is being returned, i.e. samples from the posterior 
+            distribution of the observation-level expected values.
+
+    }
+  }
+  \subsection{BUG-FIXES}{
+    \itemize{
+      \item \code{save}/\code{load} should work correctly. Report thanks to Jeremy Coyle.
+    }
+  }
+}
+\section{CHANGES IN VERSION 0.9-13}{
   \subsection{USER-VISIBLE CHANGES}{
     \itemize{
       \item \code{predict} now works when trees aren't saved, for use in testing
-            Metropolis-Hasting steps.
+            Metropolis-Hasting proposals.
+      \item The \code{offset} slot no longer changes the relative scaling of the
+            response. This stabilizes predictions across iterations. For a semantic
+            where the scaling does change, use \code{setResponse} instead.
     }
   }
 }
@@ -27,7 +85,7 @@
   \subsection{USER-VISIBLE CHANGES}{
     \itemize{
       \item Hyperprior of \code{chi(1.25, Inf)} is now default for \code{bart2}
-            with binary outcomes. The default accuracy should improve substantially
+            with binary outcomes. The default accuracy should improve substantially.
     }
   }
   \subsection{BUG-FIXES}{

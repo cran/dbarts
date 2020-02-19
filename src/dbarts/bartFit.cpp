@@ -151,22 +151,34 @@ namespace dbarts {
   
   void BARTFit::setOffset(const double* newOffset) {
     if (!control.responseIsBinary) {
-      double* sigmaUnscaled = misc_stackAllocate(control.numChains, double);
-      for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
-        sigmaUnscaled[chainNum] = state[chainNum].sigma * sharedScratch.dataScale.range;
+      // adjusting sigma is no longer necessary, as setting the offset doesn't change the scale
       
-      double priorUnscaled = model.sigmaSqPrior->getScale() * sharedScratch.dataScale.range * sharedScratch.dataScale.range;
+      //double* sigmaUnscaled = misc_stackAllocate(control.numChains, double);
+      //for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
+      //  sigmaUnscaled[chainNum] = state[chainNum].sigma * sharedScratch.dataScale.range;
+      
+      //double priorUnscaled = model.sigmaSqPrior->getScale() * sharedScratch.dataScale.range * sharedScratch.dataScale.range;
+      
+      
+      // rather than rescale response, subtract old offset and add new one
+      double* yRescaled = const_cast<double*>(sharedScratch.yRescaled);
+      
+      if (data.offset != NULL)
+        misc_addVectorsInPlace(data.offset, data.numObservations, 1.0 / sharedScratch.dataScale.range, yRescaled);
       
       data.offset = newOffset;
       
-      rescaleResponse(*this);
+      if (data.offset != NULL)
+        misc_addVectorsInPlace(data.offset, data.numObservations, -1.0 / sharedScratch.dataScale.range, yRescaled);
       
-      model.sigmaSqPrior->setScale(priorUnscaled / (sharedScratch.dataScale.range * sharedScratch.dataScale.range));
+      // rescaleResponse(*this);
       
-      for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
-        state[chainNum].sigma = sigmaUnscaled[chainNum] / sharedScratch.dataScale.range;
+      // model.sigmaSqPrior->setScale(priorUnscaled / (sharedScratch.dataScale.range * sharedScratch.dataScale.range));
       
-      misc_stackFree(sigmaUnscaled);
+      // for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
+      //   state[chainNum].sigma = sigmaUnscaled[chainNum] / sharedScratch.dataScale.range;
+      
+      // misc_stackFree(sigmaUnscaled);
       
     } else {
       data.offset = newOffset;
@@ -965,7 +977,7 @@ namespace {
     numNodes += storeFlattenedTree(fit, *node.getRightChild(), rightIndexSet,
                                    numObservations + numNodes, variable + numNodes, value + numNodes);
     
-    return numNodes;  
+    return numNodes;
   }
 }
 
@@ -1166,13 +1178,15 @@ namespace dbarts {
     
     return resultsPointer;
   }
-  
-    
+
   void BARTFit::sampleTreesFromPrior()
   {
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
       for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
+        // sample tree from prior should probably be re-written to be consistent with the observed
+        // (and conditioned on) data
         state[chainNum].trees[treeNum].sampleFromPrior(*this, state[chainNum].rng);
+        state[chainNum].trees[treeNum].collapseEmptyNodes();
       }
     }
   }
@@ -1924,11 +1938,11 @@ namespace {
     
     double* yRescaled = const_cast<double*>(fit.sharedScratch.yRescaled);
     
-    if (data.offset != NULL) {
-      misc_addVectors(data.offset, data.numObservations, -1.0, data.y, yRescaled);
-    } else {
+    //if (data.offset != NULL) {
+    //  misc_addVectors(data.offset, data.numObservations, -1.0, data.y, yRescaled);
+    //} else {
       std::memcpy(yRescaled, data.y, data.numObservations * sizeof(double));
-    }
+    //}
     
     sharedScratch.dataScale.min = yRescaled[0];
     sharedScratch.dataScale.max = yRescaled[0];
@@ -1938,6 +1952,9 @@ namespace {
     }
     sharedScratch.dataScale.range = sharedScratch.dataScale.max - sharedScratch.dataScale.min;
     if (sharedScratch.dataScale.max == sharedScratch.dataScale.min) sharedScratch.dataScale.range = 1.0;
+    
+    if (data.offset != NULL)
+      misc_addVectorsInPlace(data.offset, data.numObservations, -1.0, yRescaled);
     
     // yRescaled = (y - offset - min) / (max - min) - 0.5
     misc_addScalarToVectorInPlace(   yRescaled, data.numObservations, -sharedScratch.dataScale.min);

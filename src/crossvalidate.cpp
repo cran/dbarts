@@ -99,7 +99,7 @@ namespace dbarts { namespace xval {
       else 
         ext_printf("k w/hyperprior, ");
       ext_printf(" %lu power par(s), %lu base par(s)\n", numPowers, numBases);
-      ext_printf("  results of type: %s\n", lossFunctorDef.displayString);
+      ext_printf("  results of type: %s, %lu thread(s)\n", lossFunctorDef.displayString, numThreads);
       ext_printf("  num samp: %lu, num reps: %lu\n", origControl.defaultNumSamples, numReps);
       ext_printf("  burn in: %lu first, %lu shift, %lu rep\n\n", numInitialBurnIn, numContextShiftBurnIn, numRepBurnIn);
 
@@ -139,6 +139,8 @@ namespace dbarts { namespace xval {
     ext_rng_algorithm_t rng_algorithm = static_cast<ext_rng_algorithm_t>(threadControl.rng_algorithm);
     ext_rng_standardNormal_t rng_standardNormal = static_cast<ext_rng_standardNormal_t>(threadControl.rng_standardNormal);
     
+    threadControl.rng_algorithm = RNG_ALGORITHM_USER_POINTER;
+    
     if (numThreads <= 1) {
       ext_rng* rng;
       
@@ -148,7 +150,6 @@ namespace dbarts { namespace xval {
         
         if ((rng = ext_rng_createDefault(true)) == NULL)
           ext_throwError("could not allocate rng");
-      
       } else {
         if (ext_rng_createAndSeed(&rng, rng_algorithm, rng_standardNormal) != 0)
           ext_throwError("could not allocate rng");
@@ -309,7 +310,7 @@ extern "C" {
       maxNumTrainingObservations = origData.numObservations - maxNumTestObservations;
     }
     
-    size_t numSamples              = origControl.defaultNumSamples;
+    size_t numSamples = origControl.defaultNumSamples;
         
     const LossFunctorDefinition& lfDef(sharedData.lossFunctorDef);
     bool lossRequiresMutex = lfDef.requiresMutex && !misc_btm_isNull(sharedData.threadManager);
@@ -344,14 +345,14 @@ extern "C" {
     repControl.numThreads = 1;
     repControl.verbose = false;
     bool verbose = origControl.verbose;
-    
-    BARTFit* fit = new BARTFit(repControl, origModel, origData);
-    
+
     Data repData;
     Model repModel;
+    allocateDataStorage(origData, repData, maxNumTrainingObservations, maxNumTestObservations);
+    allocateModelStorage(origModel, repModel);
     
-    allocateDataStorage(fit->data, repData, maxNumTrainingObservations, maxNumTestObservations);
-    allocateModelStorage(fit->model, repModel);
+    BARTFit* fit = new BARTFit(repControl, repModel, repData);
+    fit->state->rng = threadData.rng;
     
     CrossvalidationData xvalData = { *fit, origData, repData, 0 };
     
@@ -373,12 +374,12 @@ extern "C" {
       threadScratch->numRepBurnIn = sharedData.numRepBurnIn;
       
       v_threadScratch = threadScratch;
-      
+
       crossvalidate = &kFoldCrossvalidate;
     } else {
       RandomSubsampleThreadScratch* threadScratch = new RandomSubsampleThreadScratch;
       v_threadScratch = threadScratch;
-      
+
       crossvalidate = &randomSubsampleCrossvalidate;
     }
     v_threadScratch->maxNumTrainingObservations = maxNumTrainingObservations;
@@ -507,7 +508,7 @@ namespace {
     randomSubsampleDivideData(xvalData.origData, xvalData.repData, threadScratch.y_test,
                               threadScratch.generator, threadScratch.permutation);
     xvalData.fit.setData(xvalData.repData);
-    
+
     xvalData.fit.runSampler(xvalData.numBurnIn, samples);
     
     if (lossRequiresMutex) {
@@ -678,10 +679,26 @@ namespace {
     repData.y = new double[numTrainingObservations];
     repData.x = new double[numTrainingObservations * origData.numPredictors];
     repData.x_test = new double[numTestObservations * origData.numPredictors];
+    
+    // copy in some default values for use with the BART constructor
+    // these could be skipped by creating a constructor that waits for
+    // data to be assigned or through tricky use of placement new
+    std::memcpy(const_cast<double*>(repData.y), origData.y, numTrainingObservations * sizeof(double));
+    std::memcpy(const_cast<double*>(repData.x), origData.x, numTrainingObservations * origData.numPredictors * sizeof(double));
+    std::memcpy(const_cast<double*>(repData.x_test), origData.x, numTestObservations * origData.numPredictors * sizeof(double));
      
-    repData.weights    = origData.weights != NULL ? new double[numTrainingObservations]  : NULL;
-    repData.offset     = origData.offset  != NULL ? new double[numTrainingObservations]  : NULL;
-    repData.testOffset = origData.offset  != NULL ? new double[numTestObservations] : NULL;
+    // should be OK to leave weights and test offset garbage until run() is called
+    repData.weights = origData.weights != NULL ? new double[numTrainingObservations]  : NULL;
+    
+    if (origData.offset == NULL) {
+      repData.offset = NULL;
+      repData.testOffset = NULL;
+    } else {
+      repData.offset     = new double[numTrainingObservations];
+      repData.testOffset = new double[numTestObservations];
+     
+      std::memcpy(const_cast<double*>(repData.offset), origData.offset, numTrainingObservations * sizeof(double));
+    }
     
     repData.numObservations     = numTrainingObservations;
     repData.numPredictors       = origData.numPredictors;

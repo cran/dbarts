@@ -97,7 +97,7 @@ AC_DEFUN([AX_COMPILER_EXT],
     esac
   ;;
   esac
-        
+  
   if test x"$ax_cv_support_sse2_ext" = x"yes"; then
     AC_DEFINE(HAVE_SSE2,1,[Support SSE2 (Streaming SIMD Extensions 2) instructions])
   fi

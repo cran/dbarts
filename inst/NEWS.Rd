@@ -1,6 +1,47 @@
 \name{NEWS}
 \title{dbarts News}
 \encoding{UTF-8}
+\section{CHANGES IN VERSION 0.9-19}{
+  \subsection{NEW FEATURES}{
+    \itemize{
+      \item Samplers now have method \code{sampleNodeParametersFromPrior}.
+            When used in conjunction with \code{sampleTreesFromPrior} allow
+            the model to fully make predictions from the prior distribution.
+      \item \code{dbartsControl} (and now \code{bart}/\code{bart2} through
+            \code{...}) now accept \code{rngSeed} argument. This can be used
+            to generate reproducible results with multiple threads. It should
+            only be used for testing, as the thread-specific pRNGs are seeded
+            using sequential draws from a pRNG created with the user-supplied
+            seed.
+      \item C interface supports \code{dbarts_createStateExpression} and 
+            \code{dbarts_initializeState} which can be used to re-create
+            samplers that were allocated using forked multithreading.
+      \item C interface also supports \code{dbarts_predict},
+            \code{dbarts_setControl}, and \code{dbarts_printTrees}.
+      \item Exports \code{makeTestModelMatrix} to allow package authors to
+            create test data at a later point from training data.
+    }
+  }
+  \subsection{USER-VISIBLE CHANGES}{
+    \itemize{
+      \item \code{varcount} for \code{bart} fits now has dimnames set.
+      \item \code{residuals} feneric added to \code{bart} and \code{rbart_vi}.
+    }
+  }
+  \subsection{BUG FIXES}{
+    \itemize{
+      \item Parallelization for \code{rbart} now creates the correct
+            number of chains.
+      \item Should now compile on non-x86 architectures. Report thanks to
+            Lars Viklund.
+      \item Fixed hang when \code{verbose = TRUE} for multiple threads and
+            multiple chains. Report thanks to Noah Greifer.
+      \item Fixed potential memory access errors when recreating sample from
+            saved state.
+      \item Correctly de-serializes saved tree structure.
+    }
+  }
+}
 \section{CHANGES IN VERSION 0.9-18}{
   \subsection{NEW FEATURES}{
     \itemize{

@@ -41,6 +41,10 @@ extern "C" {
   }
   // void dbarts_invalidateControl(Control* control) { }
   
+  void dbarts_setControl(dbarts::BARTFit* fit, const dbarts::Control* control) {
+    fit->setControl(*control);
+  }
+  
   dbarts::Data* dbarts_createData(SEXP dataExpr) {
     Data* result = new Data;
     initializeDataFromExpression(*result, dataExpr);
@@ -73,11 +77,25 @@ extern "C" {
     invalidateModel(*model);
   }
   
+  SEXP dbarts_createStateExpression(const dbarts::BARTFit* fit) {
+    return createStateExpressionFromFit(*fit);
+  }
+  void dbarts_initializeState(dbarts::BARTFit* fit, SEXP stateExpr) {
+    initializeStateFromExpression(*fit, stateExpr);
+  }
+  
   void dbarts_setRNGState(BARTFit* fit, const void* const* uniformState, const void* const* normalState) {
     fit->setRNGState(uniformState, normalState);
   }
   void dbarts_printInitialSummary(const dbarts::BARTFit* fit) {
     fit->printInitialSummary();
+  }
+  void dbarts_printTrees(const dbarts::BARTFit* fit,
+                         const std::size_t* chains, std::size_t numChains,
+                         const std::size_t* samples, std::size_t numSamples,
+                         const std::size_t* indices, std::size_t numIndices)
+  {
+    fit->printTrees(chains, numChains, samples, numSamples, indices, numIndices);
   }
   Results* dbarts_runSampler(BARTFit* fit) {
     return fit->runSampler();
@@ -93,6 +111,14 @@ extern "C" {
   
   void dbarts_sampleTreesFromPrior(BARTFit* fit) {
     fit->sampleTreesFromPrior();
+  }
+  
+  void dbarts_sampleNodeParametersFromPrior(BARTFit* fit) {
+    fit->sampleNodeParametersFromPrior();
+  }
+  
+  void dbarts_predict(const BARTFit* fit, const double* x_test, std::size_t numTestObservations, const double* testOffset, double* result) {
+    fit->predict(x_test, numTestObservations, testOffset, result);
   }
   
   void dbarts_setResponse(BARTFit* fit, const double* newResponse) {

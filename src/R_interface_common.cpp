@@ -148,6 +148,13 @@ namespace dbarts {
     if (rngNormalKindNumber == MISC_STR_NO_MATCH) Rf_error("unsupported rng normal kind '%s'", rngNormalKindName);
     
     control.rng_standardNormal = static_cast<rng_standardNormal_t>(rngNormalKindNumber);
+    
+    slotExpr = Rf_getAttrib(controlExpr, Rf_install("rngSeed"));
+    slotLength = rc_getLength(slotExpr);
+    if (slotLength != 1) Rf_error("slot 'rngSeed' must be of length 1");
+    i_temp = INTEGER(slotExpr)[0];
+    if (i_temp == NA_INTEGER) i_temp = DBARTS_CONTROL_INVALID_SEED;
+    control.rng_seed = static_cast<uint_least32_t>(i_temp);
   }
 }
 
@@ -583,11 +590,12 @@ namespace dbarts {
     }
   }
   
-  void initializeStateFromExpression(BARTFit& fit, State* state, SEXP stateExpr)
+  void initializeStateFromExpression(BARTFit& fit, SEXP stateExpr)
   {
     const Control& control(fit.control);
     const Data& data(fit.data);
     const Model& model(fit.model);
+    State* state = fit.state;
     
     // check to see if it is an old-style saved object with only a single state
     SEXP classExpr = rc_getClass(stateExpr);

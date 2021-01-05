@@ -8,7 +8,7 @@ export(xbart)
 export(rbart_vi)
 export(guessNumCores)
 
-export(makeind, makeModelMatrixFromDataFrame)
+export(makeind, makeModelMatrixFromDataFrame, makeTestModelMatrix)
 
 exportClasses(dbartsSampler)
 export(extract)
@@ -20,9 +20,11 @@ S3method(plot, pd2bart)
 S3method(fitted, bart)
 S3method(extract, bart)
 S3method(predict, bart)
+S3method(residuals, bart)
 S3method(fitted, rbart)
 S3method(extract, rbart)
 S3method(predict, rbart)
+S3method(residuals, rbart)
 
 importFrom(methods, setRefClass, setClass, setClassUnion, callNextMethod, validObject, is, new, setValidity, setMethod)
 
@@ -30,7 +32,7 @@ importFrom(stats, model.frame, model.offset, model.response, model.weights, is.e
 importFrom(stats, lm, pnorm, quantile)
 importFrom(stats, as.formula, setNames)
 
-importFrom(parallel, makeCluster, clusterExport, clusterEvalQ, clusterCall, stopCluster)
+importFrom(parallel, makeCluster, clusterExport, clusterEvalQ, clusterMap, stopCluster)
 importFrom(stats, sd, rnorm, rexp, runif, rbinom, optim, optimHess, dnorm)
 
 importFrom(graphics, abline, contour, image, lines, par, plot, title, strheight, text)

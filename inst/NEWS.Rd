@@ -1,6 +1,47 @@
 \name{NEWS}
 \title{dbarts News}
 \encoding{UTF-8}
+\section{CHANGES IN VERSION 0.9-20}{
+  \subsection{NEW FEATURES}{
+    \itemize{
+      \item \code{dbarts} now exposes access to the underlying proposal
+             rules and their probabilities through its \code{proposal.probs}
+             argument. \code{bart2} response to the same argument, while
+             \code{bart} uses \code{proposalprobs}.
+      \item \code{bart}, \code{bart2}, and \code{rbart_vi} accept a
+             \code{seed} argument that will yield reproducible results, even
+             when running with multiple threads and multiple chains.
+    }
+  }
+  \subsection{USER-VISIBLE CHANGES}{
+    \itemize{
+       \item The interface registered under \code{R_RegisterCCallable} has
+             changed to reflect proper fixed hyperpriors for \code{k}.
+       \item Samples of the end-node sensitivity parameter, \code{k},
+             are returned by \code{rbart_vi} when it modeled.
+       \item Burn-in samples of the end-node sensitivity parameter,
+             \code{k}, are included in the results of \code{bart},
+             \code{bart2}, and \code{rbart_vi}.
+       \item \code{rbart_vi} will now look for \code{group.by} and
+             \code{group.by.test} in the \code{data} and \code{test} arguments
+             before looking in the \code{formula} or calling environments.
+     }
+  }
+  \subsection{BUG FIXES}{
+    \itemize{
+      \item Fix for \code{k} mixing across chains when running multithreaded
+            and with \code{k} being modeled. Bug report thanks to Noah
+            Greifer.
+      \item Fix for \code{xbart} with \code{method = "k-fold"} when data
+            not evenly divided by number of folds. Rug report thanks to Jesse
+            (@ALEXLANGLANG on Github).
+      \item Sampler method \code{getLatents} and corresponding C function now
+            add user supplied offset to result.
+      \item Saved, flattened trees now correctly partition observations on
+            left and right.
+    }
+  }
+}
 \section{CHANGES IN VERSION 0.9-19}{
   \subsection{NEW FEATURES}{
     \itemize{
@@ -25,7 +66,7 @@
   \subsection{USER-VISIBLE CHANGES}{
     \itemize{
       \item \code{varcount} for \code{bart} fits now has dimnames set.
-      \item \code{residuals} feneric added to \code{bart} and \code{rbart_vi}.
+      \item \code{residuals} generic added to \code{bart} and \code{rbart_vi}.
     }
   }
   \subsection{BUG FIXES}{

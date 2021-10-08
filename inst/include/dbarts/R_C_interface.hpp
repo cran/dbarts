@@ -7,7 +7,11 @@
 
 #include <Rversion.h>
 
-#if R_VERSION <= R_Version(3,3,1)
+#if R_VERSION >= R_Version(3, 6, 2)
+#define USE_FC_LEN_T
+#endif
+
+#if R_VERSION <= R_Version(3, 3, 1)
 // Rinternals.h includes R_ext/Memory.h and R_ext/Utils.h which reference size_t
 // Rinternals.h also references FILE from stdio.h
 #  define NO_C_HEADERS
@@ -24,6 +28,7 @@ using std::FILE;
 
 #undef NO_C_HEADERS
 #undef R_NO_REMAP
+#undef USE_FC_LEN_T
 
 namespace dbarts {
   struct Control;
@@ -35,6 +40,7 @@ namespace dbarts {
   struct NormalPrior;
   struct ChiSquaredPrior;
   struct ChiHyperprior;
+  struct FixedHyperprior;
   
   struct BARTFit;
   struct Results;
@@ -116,9 +122,9 @@ extern "C" {
   void dbarts_invalidateCGMPrior(dbarts::CGMPrior* prior);
   
   dbarts::NormalPrior* dbarts_createNormalPrior();
-  dbarts::NormalPrior* dbarts_createNormalPriorFromOptions(const dbarts::Control* control, const dbarts::Model* model, double k);
+  dbarts::NormalPrior* dbarts_createNormalPriorFromOptions(const dbarts::Control* control, const dbarts::Model* model);
   void dbarts_destroyNormalPrior(dbarts::NormalPrior* prior);
-  void dbarts_initializeNormalPriorFromOptions(dbarts::NormalPrior* prior, const dbarts::Control* control, const dbarts::Model* model, double k);
+  void dbarts_initializeNormalPriorFromOptions(dbarts::NormalPrior* prior, const dbarts::Control* control, const dbarts::Model* model);
   void dbarts_invalidateNormalPrior(dbarts::NormalPrior* prior);
   
   dbarts::ChiHyperprior* dbarts_createChiHyperprior();
@@ -126,6 +132,12 @@ extern "C" {
   void dbarts_destroyChiHyperprior(dbarts::ChiHyperprior* prior);
   void dbarts_initializeChiHyperpriorFromOptions(dbarts::ChiHyperprior* prior, double degreesOfFreedom, double scale);
   void dbarts_invalidateChiHyperprior(dbarts::ChiHyperprior* prior);
+  
+  dbarts::FixedHyperprior* dbarts_createFixedHyperprior();
+  dbarts::FixedHyperprior* dbarts_createFixedHyperpriorFromOptions(double k);
+  void dbarts_destroyFixedHyperprior(dbarts::FixedHyperprior* prior);
+  void dbarts_initializeFixedHyperpriorFromOptions(dbarts::FixedHyperprior* prior, double k);
+  void dbarts_invalidateFixedHyperprior(dbarts::FixedHyperprior* prior);
   
   dbarts::ChiSquaredPrior* dbarts_createChiSquaredPrior();
   dbarts::ChiSquaredPrior* dbarts_createChiSquaredPriorFromOptions(double degreesOfFreedom, double quantile);

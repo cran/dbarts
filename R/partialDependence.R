@@ -39,12 +39,12 @@ pdbart <- function (
     bartCall <- redirectCall(matchedCall, dbarts::bart)
     massign[sampler, fit] <- pdbart.getAndInitializeSampler(bartCall, callingEnv)
     
-  } else if (is(x.train, "dbartsSampler")) {
+  } else if (inherits(x.train, "dbartsSampler")) {
     sampler <- x.train
     fit <- list()
     if (!sampler$control@keepTrees)
       warning("calling pdbart with a sampler that does not have keepTrees set to TRUE will cause new samples to be generated and the state to be changed")
-  } else if (is(x.train, "bart")) {
+  } else if (inherits(x.train, "bart")) {
     fit <- x.train
     sampler <- fit$fit
     if (is.null(sampler)) {
@@ -60,13 +60,13 @@ pdbart <- function (
   
   tryResult <- tryCatch(xind, error = I)
 
-  if (is(tryResult, "error")) {
+  if (inherits(tryResult, "error")) {
     formula <- ~a
     formula[[2L]] <- matchedCall[["xind"]]
     terms <- terms(formula)
     
     xind <- attr(terms, "term.labels")
-  } else if (!is(tryResult, "error") && is.character(xind) &&
+  } else if (!inherits(tryResult, "error") && is.character(xind) &&
              length(xind) == 1L && xind %not_in% colnames(sampler$data@x))
   {
     formula <- ~a
@@ -135,7 +135,7 @@ pdbart <- function (
     
     samples <- sampler$run(0L, sampler$control@n.samples)
     if (is.null(fit[["call"]])) {
-      fit <- packageBartResults(sampler, samples, fit$sigma, TRUE)
+      fit <- packageBartResults(sampler, samples, fit$sigma, fit[["k"]], TRUE)
       fit[["yhat.test"]] <- NULL
     }
     
@@ -200,12 +200,12 @@ pd2bart <- function(
     bartCall <- redirectCall(matchedCall, dbarts::bart)
     massign[sampler, fit] <- pdbart.getAndInitializeSampler(bartCall, callingEnv)
     
-  } else if (is(x.train, "dbartsSampler")) {
+  } else if (inherits(x.train, "dbartsSampler")) {
     sampler <- x.train
     fit <- list()
     if (!sampler$control@keepTrees)
       warning("calling pd2bart with a sampler that does not have keepTrees set to TRUE will cause new samples to be generated and the state to be changed")
-  } else if (is(x.train, "bart")) {
+  } else if (inherits(x.train, "bart")) {
     fit <- x.train
     sampler <- fit$fit
     if (is.null(sampler)) {
@@ -220,13 +220,13 @@ pd2bart <- function(
   }
     
   tryResult <- tryCatch(xind, error = I)
-  if (is(tryResult, "error")) {
+  if (inherits(tryResult, "error")) {
     formula <- ~a
     formula[[2L]] <- matchedCall[["xind"]]
     terms <- terms(formula)
     
     xind <- attr(terms, "term.labels")
-  } else if (!is(tryResult, "error") && is.character(xind) &&
+  } else if (!inherits(tryResult, "error") && is.character(xind) &&
              length(xind) == 1L && xind %not_in% colnames(sampler$data@x))
   {
     formula <- ~a
@@ -320,7 +320,7 @@ pd2bart <- function(
       }
     }
     if (is.null(fit[["call"]])) {
-      fit <- packageBartResults(sampler, samples, fit$sigma, TRUE)
+      fit <- packageBartResults(sampler, samples, fit$sigma, fit[["k"]], TRUE)
       fit[["yhat.test"]] <- NULL
     }
   }

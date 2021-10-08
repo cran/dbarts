@@ -65,6 +65,48 @@ test_that("works with multiple threads", {
             "rbart")
 })
 
+test_that("is reproducible", {
+  x <- testData$x
+  y <- testData$y
+  g <- factor(testData$g)
+  
+  fit1 <- rbart_vi(y ~ x, group.by = g,
+                   n.samples = 5L, n.burn = 0L, n.thin = 1L, n.chains = 2L,
+                   n.trees = 3L, n.threads = 2L,
+                   seed = 0L)
+  fit2 <- rbart_vi(y ~ x, group.by = g,
+                   n.samples = 5L, n.burn = 0L, n.thin = 1L, n.chains = 2L,
+                   n.trees = 3L, n.threads = 2L,
+                   seed = 0L)
+  
+  set.seed(0)
+  seeds <- sample.int(.Machine$integer.max, 2L)
+  
+  set.seed(seeds[1L])
+  fit3 <- rbart_vi(y ~ x, group.by = g,
+                   n.samples = 5L, n.burn = 0L, n.thin = 1L, n.chains = 1L,
+                   n.trees = 3L, n.threads = 1L)
+  
+  set.seed(seeds[2L])
+  fit4 <- rbart_vi(y ~ x, group.by = g,
+                   n.samples = 5L, n.burn = 0L, n.thin = 1L, n.chains = 1L,
+                   n.trees = 3L, n.threads = 1L)
+  
+  expect_equal(fit1$yhat.train, fit2$yhat.train)
+  expect_equal(fit1$ranef, fit2$ranef)
+  
+  
+  yhat <- aperm(array(c(fit3$yhat.train, fit4$yhat.train),
+                      c(dim(fit3$yhat.train), 2L)),
+                c(3L, 1L, 2L))
+  expect_equal(yhat, fit1$yhat.train)
+  
+  ranef <- aperm(array(c(fit3$ranef, fit4$ranef),
+                       c(dim(fit3$ranef), 2L)),
+                 c(3L, 1L:2L))
+  expect_equal(as.vector(ranef), as.vector(fit1$ranef))
+})
+
 test_that("extract works at baseline", {
   x <- testData$x
   y <- testData$y
@@ -270,7 +312,9 @@ test_that("rbart compares favorably to lmer for nonlinear models", {
   lmerFit <- suppressWarnings(lme4$lmer(y ~ . - g + (1 | g), df))
   ranef.lmer <- lme4$ranef.merMod(lmerFit)[[1L]][[1L]]
   
-  expect_true(sqrt(mean((b - ranef.rbart)^2)) < sqrt(mean((b - ranef.lmer)^2)))
+  b_rmse.rbart <- sqrt(mean((b - ranef.rbart)^2))
+  b_rmse.lmer <- sqrt(mean((b - ranef.lmer)^2))
+  expect_true(b_rmse.rbart < b_rmse.lmer)
   
   
   rho <- 0.4
@@ -289,8 +333,11 @@ test_that("rbart compares favorably to lmer for nonlinear models", {
   
   glmerFit <- lme4$glmer(y ~ . - g + (1 | g), df, family = binomial(link = "probit"))
   
-  rbart.mu.hat <- apply(rbartFit$yhat.train, 3, mean)
-  glmer.mu.hat  <- predict(glmerFit)
-  expect_true(sqrt(mean((rbart.mu.hat - Ey)^2)) < sqrt(mean((glmer.mu.hat - Ey)^2)))
+  rbart.mu.hat <- fitted(rbartFit)
+  glmer.mu.hat <- fitted(glmerFit, type = "response")
+  
+  dev.rbart <- -2 * mean(log(ifelse(df$y == 1, rbart.mu.hat, 1 - rbart.mu.hat)))
+  dev.glmer <- -2 * mean(log(ifelse(df$y == 1, glmer.mu.hat, 1 - glmer.mu.hat)))
+  expect_true(dev.rbart < dev.glmer)
 })
 

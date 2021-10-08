@@ -1,16 +1,35 @@
 setMethod("initialize", "dbartsModel",
-          function(.Object, tree.prior, node.prior, resid.prior,
-                   p.birth_death = 0.5, p.swap = 0.1, p.change = 0.4,
-                   p.birth = 0.5, node.scale = 0.5)
+          function(.Object, tree.prior, node.prior, node.hyperprior, resid.prior,
+                   proposal.probs = c(birth_death = 0.5, swap = 0.1, change = 0.4,
+                                      birth = 0.5),
+                   node.scale = 0.5)
 {
   if (!missing(tree.prior)) .Object@tree.prior  <- tree.prior
   if (!missing(node.prior)) .Object@node.prior  <- node.prior
+  if (!missing(node.hyperprior)) .Object@node.hyperprior  <- node.hyperprior
   if (!missing(resid.prior)) .Object@resid.prior <- resid.prior
   
-  .Object@p.birth_death <- p.birth_death
-  .Object@p.swap <- p.swap
-  .Object@p.change <- p.change
-  .Object@p.birth <- p.birth
+  if (is.null(proposal.probs))
+    proposal.probs <- c(birth_death = 0.5, swap = 0.1, change = 0.4, birth = 0.5)
+  
+  probs <- proposal.probs[c("birth_death", "swap", "change")]
+  if (sum(is.na(probs)) == 1L) {
+    probs[is.na(probs)] <- 1 - sum(probs[!is.na(probs)])
+    names(probs) <- c("birth_death", "swap", "change")
+  } else if (all(is.na(probs))) {
+    probs <- c(birth_death = 0.5, swap = 0.1, change = 0.4)
+  }
+  
+  .Object@p.birth_death <- probs[["birth_death"]]
+  .Object@p.swap <- probs[["swap"]]
+  .Object@p.change <- probs[["change"]]
+  
+  probs <- proposal.probs["birth"]
+  if (is.na(probs)) probs <- c(birth = 0.5)
+  
+  
+  .Object@p.birth <- probs[["birth"]]
+  
   .Object@node.scale <- node.scale
 
   validObject(.Object)
@@ -33,15 +52,20 @@ parsePriors <- function(control, data, tree.prior, node.prior, resid.prior, pare
   if (control@binary)
     formals(evalEnv$normal)[["k"]] <- quote(chi(1.25, Inf))
 
-  if (is.symbol(matchedCall$tree.prior)) matchedCall$tree.prior <- call(as.character(matchedCall$tree.prior))
-  if (is.symbol(matchedCall$resid.prior)) matchedCall$resid.prior <- call(as.character(matchedCall$resid.prior))
-  if (is.symbol(matchedCall$node.prior)) matchedCall$node.prior <- call(as.character(matchedCall$node.prior))
+  if (is.symbol(matchedCall$tree.prior))
+    matchedCall$tree.prior  <- call(as.character(matchedCall$tree.prior))
+  if (is.symbol(matchedCall$resid.prior))
+    matchedCall$resid.prior <- call(as.character(matchedCall$resid.prior))
+  if (is.symbol(matchedCall$node.prior))
+    matchedCall$node.prior  <- call(as.character(matchedCall$node.prior))
   
-  tree.prior <- eval(matchedCall$tree.prior, evalEnv)
+  tree.prior  <- eval(matchedCall$tree.prior, evalEnv)
   resid.prior <- eval(matchedCall$resid.prior, evalEnv)
-  node.prior <- eval(matchedCall$node.prior, evalEnv)
   
-  namedList(tree.prior, resid.prior, node.prior)
+  node.prior <- node.hyperprior <- NULL
+  massign[node.prior, node.hyperprior] <- eval(matchedCall$node.prior, evalEnv)
+  
+  namedList(tree.prior, resid.prior, node.prior, node.hyperprior)
 }
 
 
@@ -60,7 +84,7 @@ normal <- function(k = 2.0)
   if (!is.null(matchedCall[["k"]])) {
     kExpr <- matchedCall[["k"]]
     for (i in seq_len(2L)) {
-      if (is.numeric(kExpr) || is(kExpr, "dbartsNodeHyperprior")) break
+      if (is.numeric(kExpr) || inherits(kExpr, "dbartsNodeHyperprior")) break
       
       if (is.character(kExpr)) {
         if (startsWith(kExpr, "chi")) {
@@ -77,12 +101,15 @@ normal <- function(k = 2.0)
       # additional level of casting/eval
       kExpr <- eval(kExpr, evalEnv)
     }
-    k <- kExpr
+    kHyperprior <- kExpr
   } else {
-    k <- eval(formals()[["k"]], evalEnv)
+    kHyperprior <- eval(formals()[["k"]], evalEnv)
   }
   
-  new("dbartsNormalPrior", k = k)
+  if (is.numeric(kHyperprior))
+    kHyperprior <- new("dbartsFixedHyperprior", k = kHyperprior)
+  
+  namedList(node.prior = new("dbartsNormalPrior"), node.hyperprior = kHyperprior)
 }
 
 chisq <- function(df = 3, quant = 0.9)

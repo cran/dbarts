@@ -29,7 +29,9 @@ bart(x.train, y.train, x.test = matrix(0.0, 0, 0),
      printevery = 100, keepevery = 1, keeptrainfits = TRUE,
      usequants = FALSE, numcut = 100, printcutoffs = 0,
      verbose = TRUE, nchain = 1, nthread = 1, combinechains = TRUE,
-     keeptrees = FALSE, keepcall = TRUE, sampleronly = FALSE)
+     keeptrees = FALSE, keepcall = TRUE, sampleronly = FALSE,
+     seed = NA_integer_,
+     proposalprobs = NULL)
 
 bart2(formula, data, test, subset, weights, offset, offset.test = offset,
       sigest = NA_real_, sigdf = 3.0, sigquant = 0.90,
@@ -42,7 +44,10 @@ bart2(formula, data, test, subset, weights, offset, offset.test = offset,
       n.thin = 1L, keepTrainingFits = TRUE,
       printEvery = 100L, printCutoffs = 0L,
       verbose = TRUE, keepTrees = FALSE, 
-      keepCall = TRUE, samplerOnly = FALSE, \dots)
+      keepCall = TRUE, samplerOnly = FALSE,
+      seed = NA_integer_,
+      proposal.probs = NULL,
+      \dots)
      
 \method{plot}{bart}(x,
      plquants = c(0.05, 0.95), cols = c('blue', 'black'),
@@ -200,6 +205,14 @@ extract(object, \dots)
      Logical; if \code{FALSE}, returned object will have \code{call} set to \code{call("NULL")}, otherwise the call
           used to instantiate BART.
    }
+   \item{seed}{
+     Optional integer specifying the desired pRNG \link[=set.seed]{seed}. It should not be needed
+     when running single-threaded - \code{\link{set.seed}} will suffice, and can be used to
+     obtain reproducible results when multi-threaded. See Reproducibility section below.
+   }
+   \item{proposalprobs, proposal.probs}{
+     Named numeric vector or \code{NULL}, optionally specifying the proposal rules and their probabilities. Elements should be \code{"birth_death"}, \code{"change"}, and \code{"swap"} to control tree change proposals, and \code{"birth"} to give the relative frequency of birth/death in the \code{"birth_death"} step. Defaults are 0.5, 0.1, 0.4, and 0.5 respectively.
+   }
    
    \item{formula}{
      The same as \code{x.train}, the name reflecting that a formula object can be used instead.
@@ -336,6 +349,27 @@ extract(object, \dots)
     object before saving, e.g. for a fitted object \code{bartFit}, execute
     \code{invisible(bartFit$fit$state)}.
   }
+  
+  \subsection{Reproducibility}{
+    Behavior differs when running multi- and single-threaded, as the pseudo random
+    number generators (pRNG) used by R are not thread safe. When single-threaded,
+    R's built-in generator is used; if set at the start, \code{\link{.Random.seed}}
+    will be used and its value updated as samples are drawn. When multi-threaded,
+    the default behavior is draw new random seeds for each thread using the clock
+    and use thread-specific pRNGs.
+    
+    This behavior can be modified by setting \code{seed}, or by using \code{\dots}
+    to pass arguments to \code{\link{dbartsControl}}. For the single-threaded case,
+    a new pRNG is built using that seed that is separate from R's native generator.
+    As such, the new state will not be reflected by subsequent calls to the
+    generator. For multi-threaded, the seeds for threads are drawn sequentially
+    using the supplied seed, and will again be separate from R's native
+    generator.
+    
+    Consequently, the \code{seed} argument should not be needed when running
+    single-threaded - \code{\link{set.seed}} will suffice. When multi-threaded,
+    \code{seed} can be used to obtain reproducible results.
+  }
 }
 \value{
   \code{bart} returns a list assigned class \code{bart}. For applicable
@@ -377,6 +411,8 @@ extract(object, \dots)
   \item{\code{k}}{
         Optional matrix of posterior samples of \code{k}. Only present when \code{k} is modeled,
         i.e. there is a hyperprior.}
+  \item{\code{first.k}}{
+  	    Burn-in draws of \code{k}, if modeled.}
     
   In the binary \eqn{y} case, the returned list has the components
   \code{yhat.train}, \code{yhat.test}, and \code{varcount} as above.  In addition the list 

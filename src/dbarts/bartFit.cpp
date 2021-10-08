@@ -201,9 +201,21 @@ namespace dbarts {
     data.weights = newWeights;
   }
   
+  void BARTFit::setSigma(double newSigma) {
+    for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
+      state[chainNum].sigma = newSigma / sharedScratch.dataScale.range;
+  }
+  void BARTFit::setK(double newK) {
+    for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
+      state[chainNum].k = newK;
+  }
   void BARTFit::setSigma(const double* newSigma) {
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
       state[chainNum].sigma = newSigma[chainNum] / sharedScratch.dataScale.range;
+  }
+  void BARTFit::setK(const double* newK) {
+    for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
+      state[chainNum].k = newK[chainNum];
   }
   
   void BARTFit::predict(const double* x_test, size_t numTestObservations, const double* testOffset, double* result) const
@@ -854,9 +866,8 @@ namespace dbarts {
     }
     
     if (control.numTrees != newControl.numTrees) {
-      NormalPrior* nodePrior = static_cast<NormalPrior*>(model.muPrior);
-      double precisionUnscaled = nodePrior->precision / static_cast<double>(control.numTrees);
-      nodePrior->precision = precisionUnscaled * static_cast<double>(newControl.numTrees);
+      NormalPrior& nodePrior(*static_cast<NormalPrior*>(model.muPrior));
+      nodePrior.setScale(model.nodeScale / std::sqrt(static_cast<double>(newControl.numTrees)));
     }
     
     rng_algorithm_t old_rng_algorithm = control.rng_algorithm;
@@ -878,19 +889,15 @@ namespace dbarts {
   
   void BARTFit::setModel(const Model& newModel)
   {
-    // double priorUnscaled = model.sigmaSqPrior->getScale() * sharedScratch.dataScale.range * sharedScratch.dataScale.range;
-    
     model = newModel;
     
-    // TODO: currently new model is assumed to be tweaked like model is internally,
-    // which won't work for sigmasq priors with different specified quantiles or DoF
-    
-    // model.sigmaSqPrior->setScale(priorUnscaled / (sharedScratch.dataScale.range * sharedScratch.dataScale.range));
+    if (model.sigmaSqPrior->isFixed) setSigma(static_cast<FixedPrior*>(model.sigmaSqPrior)->getScale());
+    if (model.kPrior->isFixed) setK(static_cast<FixedHyperprior*>(model.kPrior)->getK());
   }
   
-  void BARTFit::printTrees(const size_t* chainIndices, size_t numChainIndices,
+  void BARTFit::printTrees(const size_t* chainIndices,  size_t numChainIndices,
                            const size_t* sampleIndices, size_t numSampleIndices,
-                           const size_t* treeIndices, size_t numTreeIndices) const
+                           const size_t* treeIndices,   size_t numTreeIndices) const
   {
     size_t indent = 0;
     
@@ -981,9 +988,9 @@ namespace {
       size_t i = *it;
       
       if (fit.data.x[i + fit.data.numObservations * node.variableIndex] <= node.prediction) {
-        rightIndexSet.insert(i);
-      } else {
         leftIndexSet.insert(i); 
+      } else {
+        rightIndexSet.insert(i);
       }
     }
     
@@ -1163,7 +1170,7 @@ namespace dbarts {
                                           data.numTestObservations,
                                           control.defaultNumSamples == 0 ? 1 : control.defaultNumSamples,
                                           control.numChains,
-                                          model.kPrior != NULL);
+                                          !model.kPrior->isFixed);
     size_t numBurnIn = control.defaultNumBurnIn - (control.defaultNumSamples == 0 && control.defaultNumBurnIn > 0 ? 1 : 0);
     
     runSampler(numBurnIn, resultsPointer);
@@ -1182,7 +1189,7 @@ namespace dbarts {
                                           data.numTestObservations,
                                           numSamples == 0 ? 1 : numSamples,
                                           control.numChains,
-                                          model.kPrior != NULL);
+                                          !model.kPrior->isFixed);
     numBurnIn -= numSamples == 0 && numBurnIn > 0 ? 1 : 0;
     
     runSampler(numBurnIn, resultsPointer);
@@ -1273,8 +1280,16 @@ extern "C" {
     if (control.numThreads > 1 && control.numChains == 1)
       misc_htm_reserveThreadsForSubTask(fit.threadManager, 0, 0);
     
-    // const cast b/c yRescaled doesn't change, but probit latents do
-    double* y = control.responseIsBinary ? chainScratch.probitLatents : const_cast<double*>(sharedScratch.yRescaled);
+    double* y = NULL;
+    if (control.responseIsBinary) {
+      y = new double[data.numObservations];
+      std::memcpy(y, const_cast<const double*>(chainScratch.probitLatents), data.numObservations * sizeof(double));
+      if (data.offset != NULL)
+        ext_addVectorsInPlace(data.offset, data.numObservations, -1.0, y);
+    } else {
+      // const cast b/c yRescaled doesn't change, but probit version does
+      y = const_cast<double*>(sharedScratch.yRescaled);
+    }
     
     for (size_t k = 0; k < totalNumIterations; ++k) {
       if (control.numThreads > 1 && control.numChains > 1)
@@ -1293,7 +1308,8 @@ extern "C" {
           ext_printf("iteration: %u (of %u)\n", k + 1, totalNumIterations);
       }
       
-      if (!isThinningIteration && data.numTestObservations > 0) misc_setVectorToConstant(chainScratch.totalTestFits, data.numTestObservations, 0.0);
+      if (!isThinningIteration && data.numTestObservations > 0)
+        misc_setVectorToConstant(chainScratch.totalTestFits, data.numTestObservations, 0.0);
       
       for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
         double* oldTreeFits = state.treeFits + treeNum * data.numObservations;
@@ -1307,7 +1323,6 @@ extern "C" {
         state.trees[treeNum].setNodeAverages(fit, chainNum, chainScratch.treeY);
         
         metropolisJumpForTree(fit, chainNum, state.trees[treeNum], chainScratch.treeY, state.sigma, &stepTaken, &ignored);
-        
         state.trees[treeNum].sampleParametersAndSetFits(fit, chainNum, currFits, isThinningIteration ? NULL : currTestFits);
         
         // totalFits += currFits - treeFits
@@ -1327,16 +1342,17 @@ extern "C" {
           state.savedTrees[treeNum + treeSampleNum * control.numTrees].copyStructureFrom(fit, state.trees[treeNum], const_cast<const double*>(state.treeFits + treeNum * data.numObservations));
       }
       
-      if (control.responseIsBinary)
-        sampleProbitLatentVariables(fit, state, chainScratch.totalFits, y);
-      
-      if (!model.sigmaSqPrior->isFixed())
-        state.sigma = std::sqrt(model.sigmaSqPrior->drawFromPosterior(fit, chainNum, y, chainScratch.totalFits));
-      if (model.kPrior != NULL) {
-        state.k = model.kPrior->drawFromPosterior(fit, chainNum);
-        model.muPrior->setK(fit, state.k);
+      if (control.responseIsBinary) { 
+        sampleProbitLatentVariables(fit, state, chainScratch.totalFits, chainScratch.probitLatents);
+        std::memcpy(y, const_cast<const double*>(chainScratch.probitLatents), data.numObservations * sizeof(double));
+        if (data.offset != NULL)
+          ext_addVectorsInPlace(data.offset, data.numObservations, -1.0, y);
       }
       
+      if (!model.sigmaSqPrior->isFixed)
+        state.sigma = std::sqrt(model.sigmaSqPrior->drawFromPosterior(fit, chainNum, y, chainScratch.totalFits));
+      if (!model.kPrior->isFixed)
+        state.k = model.kPrior->drawFromPosterior(fit, chainNum);
             
       if (!isThinningIteration) {
         // if not out of burn-in, store result in first result; start
@@ -1353,10 +1369,12 @@ extern "C" {
                            results.trainingSamples + (resultSampleNum + chainStride) * data.numObservations,
                            results.testSamples + (resultSampleNum + chainStride) * data.numTestObservations,
                            results.sigmaSamples[resultSampleNum + chainStride],
-                           model.kPrior != NULL ? results.kSamples + resultSampleNum + chainStride : NULL);
+                           !model.kPrior->isFixed ? results.kSamples + resultSampleNum + chainStride : NULL);
         }
       }
     }
+    
+    if (control.responseIsBinary) delete [] y;
     
     delete [] currFits;
     if (data.numTestObservations > 0) delete [] currTestFits;
@@ -1445,14 +1463,16 @@ namespace dbarts {
     
     ext_printf("Prior:\n");
     // dirty hack... should have priors print themselves
-    ext_printf("\tk: %f\n", model.muPrior->getK(*this));
-    if (model.kPrior != NULL) model.kPrior->print(*this);
+    // model.muPrior->print(*this);
+    model.kPrior->print(*this);
     if (!control.responseIsBinary)
       model.sigmaSqPrior->print(*this);
     
     CGMPrior* treePrior = static_cast<CGMPrior*>(model.treePrior);
     ext_printf("\tpower and base for tree prior: %f %f\n", treePrior->power, treePrior->base);
     ext_printf("\tuse quantiles for rule cut points: %s\n", control.useQuantiles ? "true" : "false");
+    ext_printf("\tproposal probabilities: birth/death %.2f, swap %.2f, change %.2f; birth %.2f\n",
+      model.birthOrDeathProbability, model.swapProbability, model.changeProbability, model.birthProbability);
     ext_printf("data:\n");
     ext_printf("\tnumber of training observations: %u\n", data.numObservations);
     ext_printf("\tnumber of test observations: %u\n", data.numTestObservations);
@@ -1604,12 +1624,13 @@ namespace {
     if (control.responseIsBinary) {
       for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
         state[chainNum].sigma = 1.0;
-        state[chainNum].k = model.kPrior != NULL ? model.muPrior->getK(fit) : std::numeric_limits<double>::quiet_NaN();
+    
+        state[chainNum].k = model.kPrior->isFixed ? static_cast<FixedHyperprior*>(model.kPrior)->getK() : 2;
       }
     } else {
       for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
         state[chainNum].sigma = data.sigmaEstimate / sharedScratch.dataScale.range;
-        state[chainNum].k = model.kPrior != NULL ? model.muPrior->getK(fit) : std::numeric_limits<double>::quiet_NaN();
+        state[chainNum].k = model.kPrior->isFixed ? static_cast<FixedHyperprior*>(model.kPrior)->getK() : 2;
       }
       model.sigmaSqPrior->setScale(state[0].sigma * state[0].sigma * model.sigmaSqPrior->getScale());
     }
@@ -1874,7 +1895,9 @@ namespace {
         // If not using supplied generator, seed created ones
         if (rng_algorithm != EXT_RNG_ALGORITHM_USER_UNIFORM &&
             control.rng_seed != DBARTS_CONTROL_INVALID_SEED) {
-          if (ext_rng_setSeed(state[chainNum].rng, static_cast<uint_least32_t>(ext_rng_simulateUnsignedIntegerUniformInRange(seedGenerator, 0, static_cast<uint_least32_t>(-1)))) != 0) { errorMessage = "could not seed rng"; goto createRNG_cleanup; }
+          uint_least32_t chainSeed = static_cast<uint_least32_t>(ext_rng_simulateUnsignedIntegerUniformInRange(seedGenerator, 0, static_cast<uint_least32_t>(-1)));
+          if (ext_rng_setSeed(state[chainNum].rng, chainSeed) != 0) { errorMessage = "could not seed rng"; goto createRNG_cleanup; }
+          // if (ext_rng_setSeed(state[chainNum].rng, static_cast<uint_least32_t>(ext_rng_simulateUnsignedIntegerUniformInRange(seedGenerator, 0, static_cast<uint_least32_t>(-1)))) != 0) { errorMessage = "could not seed rng"; goto createRNG_cleanup; }
         } else {
           if (ext_rng_setSeedFromClock(state[chainNum].rng) != 0) { errorMessage = "could not seed rng"; goto createRNG_cleanup; }
         }
@@ -1984,7 +2007,7 @@ namespace {
     // z = 2.0 * y - 1.0 - offset; so -1 if y == 0 and 1 if y == 1 when offset == 0
 #ifndef MATCH_BAYES_TREE
     misc_setVectorToConstant(z, data.numObservations, -1.0);
-    if (data.offset != NULL) misc_addVectorsInPlace(data.offset, data.numObservations, -1.0, z);
+    // if (data.offset != NULL) misc_addVectorsInPlace(data.offset, data.numObservations, -1.0, z);
     misc_addVectorsInPlace(data.y, data.numObservations, 2.0, z);
 #else
     // BayesTree initialized the latents to be -2 and 0; was probably a bug
@@ -2030,12 +2053,13 @@ namespace {
       double offset = 0.0;
       if (fit.data.offset != NULL) offset = fit.data.offset[i];
       
+      // Samples a truncated normal with mean (mean + offset) and lower bound of 0
       if (fit.data.y[i] > 0.0) {
-        z[i] = ext_rng_simulateLowerTruncatedNormalScale1(state.rng, mean, -offset);
+        z[i] = ext_rng_simulateLowerTruncatedNormalScale1(state.rng, mean + offset, 0.0);
       } else {
-        z[i] = ext_rng_simulateUpperTruncatedNormalScale1(state.rng, mean, -offset);
+        z[i] = ext_rng_simulateUpperTruncatedNormalScale1(state.rng, mean + offset, 0.0);
       }
-#else
+      #else
       double prob;
       
       double mean = fits[i];
@@ -2050,7 +2074,6 @@ namespace {
         z[i] = mean - ext_quantileOfNormal(prob, 0.0, 1.0);
       }
 #endif
-      
     }
   }
   
@@ -2098,7 +2121,7 @@ namespace {
       results.sigmaSamples[simNum + chainStride] = sigma * sharedScratch.dataScale.range;
     }
     
-    if (model.kPrior != NULL)
+    if (!model.kPrior->isFixed)
       results.kSamples[simNum + chainStride] = k;
     
     double* variableCountSamples = results.variableCountSamples + (simNum + chainStride) * data.numPredictors;

@@ -70,7 +70,7 @@ uncombineChains <- function(samples, n.chains) {
   }
 }
 
-packageBartResults <- function(fit, samples, burnInSigma, combineChains)
+packageBartResults <- function(fit, samples, burnInSigma, burnInK, combineChains)
 {
   responseIsBinary <- fit$control@binary
   n.chains <- fit$control@n.chains
@@ -96,7 +96,6 @@ packageBartResults <- function(fit, samples, burnInSigma, combineChains)
    dimnames(varcount) <- if (length(dim(varcount)) > 2L) list(NULL, NULL, colnames(fit$data@x)) else list(NULL, colnames(fit$data@x))
   
   if (!is.null(burnInSigma)) burnInSigma <- convertSamplesFromDbartsToBart(burnInSigma, n.chains, combineChains)
-  
   if (responseIsBinary) {
     result <- list(
       call = fit$control@call,
@@ -122,8 +121,10 @@ packageBartResults <- function(fit, samples, burnInSigma, combineChains)
     result$fit <- fit
   else
     result$n.chains <- n.chains
-  if (!is.null(samples[["k"]]))
+  if (!is.null(samples[["k"]])) {
     result[["k"]] <- convertSamplesFromDbartsToBart(samples[["k"]], n.chains, combineChains)
+    result[["first.k"]] <- convertSamplesFromDbartsToBart(burnInK, n.chains, combineChains)
+  }
   
   class(result) <- 'bart'
   invisible(result)
@@ -143,7 +144,10 @@ bart2 <- function(
   n.thin = 1L, keepTrainingFits = TRUE,
   printEvery = 100L, printCutoffs = 0L,
   verbose = TRUE, keepTrees = FALSE, keepCall = TRUE,
-  samplerOnly = FALSE, ...
+  samplerOnly = FALSE,
+  seed = NA_integer_,
+  proposal.probs = NULL,
+  ...
 )
 {
   matchedCall <- match.call()
@@ -161,6 +165,7 @@ bart2 <- function(
     currentEnv <- sys.frame(sys.nframe())
     controlCall[missingDefaultArgs] <- lapply(formals(bart2)[missingDefaultArgs], eval, envir = currentEnv)
   }
+  if (!is.na(seed)) controlCall[["rngSeed"]] <- seed
   control <- eval(controlCall, envir = callingEnv)
   
   control@call <- if (keepCall) matchedCall else call("NULL")
@@ -199,6 +204,7 @@ bart2 <- function(
   sampler$sampleTreesFromPrior(updateState = FALSE)
   
   burnInSigma <- NULL
+  burnInK     <- NULL
   if (n.burn > 0L) {
     oldX.test <- sampler$data@x.test
     oldOffset.test <- sampler$data@offset.test
@@ -206,14 +212,18 @@ bart2 <- function(
     oldKeepTrainingFits <- control@keepTrainingFits
     oldVerbose <- control@verbose
 
-    if (length(oldX.test) > 0) sampler$setTestPredictorAndOffset(NULL, NULL)
+    if (length(oldX.test) > 0L)
+      sampler$setTestPredictorAndOffset(NULL, NULL)
     control@keepTrainingFits <- FALSE
     control@verbose <- FALSE
     sampler$setControl(control)
 
-    burnInSigma <- sampler$run(0L, control@n.burn, FALSE)$sigma
+    samples <- sampler$run(0L, control@n.burn, FALSE)
+    if (!is.null(samples$sigma)) burnInSigma <- samples$sigma
+    if (!is.null(samples[["k"]])) burnInK <- samples[["k"]]
     
-    if (length(oldX.test) > 0) sampler$setTestPredictorAndOffset(oldX.test, oldOffset.test)
+    if (length(oldX.test) > 0L)
+      sampler$setTestPredictorAndOffset(oldX.test, oldOffset.test)
     control@keepTrainingFits <- oldKeepTrainingFits
     control@verbose <- oldVerbose
     if (keepTrees == TRUE) control@keepTrees <- TRUE
@@ -224,7 +234,7 @@ bart2 <- function(
     samples <- sampler$run(updateState = FALSE)
   }
 
-  result <- packageBartResults(sampler, samples, burnInSigma, combineChains)
+  result <- packageBartResults(sampler, samples, burnInSigma, burnInK, combineChains)
   
   result
 }
@@ -240,7 +250,9 @@ bart <- function(
   printevery = 100L, keepevery = 1L, keeptrainfits = TRUE,
   usequants = FALSE, numcut = 100L, printcutoffs = 0L,
   verbose = TRUE, nchain = 1L, nthread = 1L, combinechains = TRUE,
-  keeptrees = FALSE, keepcall = TRUE, sampleronly = FALSE
+  keeptrees = FALSE, keepcall = TRUE, sampleronly = FALSE,
+  seed = NA_integer_,
+  proposalprobs = NULL
 )
 {
   control <- dbartsControl(keepTrainingFits = as.logical(keeptrainfits), useQuantiles = as.logical(usequants),
@@ -248,7 +260,7 @@ bart <- function(
                            n.burn = as.integer(nskip), n.trees = as.integer(ntree), n.chains = as.integer(nchain),
                            n.threads = as.integer(nthread), n.thin = as.integer(keepevery),
                            printEvery = as.integer(printevery), printCutoffs = as.integer(printcutoffs),
-                           n.cuts = numcut)
+                           n.cuts = numcut, rngSeed = as.integer(seed))
   matchedCall <- if (keepcall) match.call() else call("NULL")
   control@call <- matchedCall
   control@n.burn <- control@n.burn %/% control@n.thin
@@ -268,8 +280,8 @@ bart <- function(
   
   args <- list(formula = x.train, data = y.train, test = x.test, subset = NULL, weights = weights,
                offset = binaryOffset, verbose = as.logical(verbose), n.samples = as.integer(ndpost),
-               tree.prior = tree.prior, node.prior = node.prior,
-               resid.prior = resid.prior, control = control, sigma = as.numeric(sigest))
+               tree.prior = tree.prior, node.prior = node.prior, resid.prior = resid.prior,
+               proposal.probs = proposalprobs, control = control, sigma = as.numeric(sigest))
   sampler <- do.call(dbarts::dbarts, args, envir = parent.frame(1L))
   
   if (sampleronly) return(sampler)
@@ -277,6 +289,7 @@ bart <- function(
   control <- sampler$control
   
   burnInSigma <- NULL
+  burnInK     <- NULL
   if (nskip > 0L) {
     oldX.test <- sampler$data@x.test
     oldOffset.test <- sampler$data@offset.test
@@ -288,8 +301,10 @@ bart <- function(
     control@keepTrainingFits <- FALSE
     control@verbose <- FALSE
     sampler$setControl(control)
-
-    burnInSigma <- sampler$run(0L, control@n.burn, FALSE)$sigma
+    
+    samples <- sampler$run(0L, control@n.burn, FALSE)
+    if (!is.null(samples$sigma)) burnInSigma <- samples$sigma
+    if (!is.null(samples[["k"]])) burnInK <- samples[["k"]]
     
     if (length(x.test) > 0) sampler$setTestPredictorAndOffset(oldX.test, oldOffset.test)
     control@keepTrainingFits <- oldKeepTrainingFits
@@ -302,7 +317,7 @@ bart <- function(
     samples <- sampler$run(updateState = FALSE)
   }
 
-  result <- packageBartResults(sampler, samples, burnInSigma, combinechains)
+  result <- packageBartResults(sampler, samples, burnInSigma, burnInK, combinechains)
   
   result
 }

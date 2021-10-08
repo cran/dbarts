@@ -15,7 +15,9 @@ rbart_vi <- function(
   n.thin = 5L, keepTrainingFits = TRUE,
   printEvery = 100L, printCutoffs = 0L,
   verbose = TRUE,
-  keepTrees = TRUE, keepCall = TRUE, ...)
+  keepTrees = TRUE, keepCall = TRUE,
+  seed = NA_integer_,
+  ...)
 {
   matchedCall <- match.call()
   callingEnv <- parent.frame()
@@ -61,33 +63,53 @@ rbart_vi <- function(
   resid.prior <- quote(chisq(sigdf, sigquant))
   resid.prior[[2L]] <- sigdf; resid.prior[[3L]] <- sigquant
     
-  group.by <- tryCatch(group.by, error = function(e) e)
-  if ((is(group.by, "error") || !(is.numeric(group.by) || is.factor(group.by) || is.character(group.by))) && is.language(formula) && formula[[1L]] == '~') {
-    if (is.symbol(matchedCall[["group.by"]]) && any(names(data) == matchedCall[["group.by"]])) {
-      group.by <- data[[which(names(data) == matchedCall[["group.by"]])[1L]]]
-    } else {
-      group.by <- eval(matchedCall[["group.by"]], environment(formula))
-    }
-  }
-  if (is(group.by, "error"))
+  if (is.null(matchedCall[["group.by"]]))
+    stop("'group.by' must be specified to use rbart_vi")
+  
+  group.by.literal <- NULL
+  # look for group.by in data, if supplied, first
+  if (is.symbol(matchedCall[["group.by"]]))
+    try(group.by.literal <- data[[which.max(names(data) == matchedCall[["group.by"]])]], silent = TRUE)
+  
+  if (is.null(group.by.literal))
+    try(group.by.literal <- eval(matchedCall[["group.by"]], environment(formula)), silent = TRUE)
+  
+  if (is.null(group.by.literal)) 
+    try(group.by.literal <- group.by, silent = TRUE)
+  
+  if (is.null(group.by.literal))
     stop("'group.by' not found")
+  group.by <- group.by.literal
   if (!is.numeric(group.by) && !is.factor(group.by) && !is.character(group.by))
     stop("'group.by' must be coercible to factor type")
   
   if (!is.null(matchedCall[["group.by.test"]])) {
-    group.by.test <- tryCatch(group.by.test, error = function(e) e)
-    if ((is(group.by.test, "error") || !(is.numeric(group.by.test) || is.factor(group.by.test) || is.character(group.by.test))) && is.language(formula) && formula[[1L]] == '~') {
-      if (is.symbol(matchedCall[["group.by.test"]]) && any(names(data) == matchedCall[["group.by.test"]])) {
-        group.by.test <- data[[which(names(data) == matchedCall[["group.by.test"]])[1L]]]
-      } else {
-        group.by.test <- eval(matchedCall[["group.by.test"]], environment(formula))
-      }
-    }
-    if (is(group.by.test, "error"))
-      stop("'group.by.test' specified but not found")
+    group.by.literal <- NULL
+    if (is.symbol(matchedCall[["group.by.test"]]))
+      try(group.by.literal <- test[[which.max(names(test) == matchedCall[["group.by.test"]])]], silent = TRUE)
+  
+    if (is.null(group.by.literal))
+      try(group.by.literal <- eval(matchedCall[["group.by.test"]], environment(formula)), silent = TRUE)
+    
+    if (is.null(group.by.literal)) 
+      try(group.by.literal <- group.by.test, silent = TRUE)
+  
+    if (is.null(group.by.literal))
+      try(group.by.literal <- data[[which.max(names(data) == matchedCall[["group.by.test"]])]], silent = TRUE)
+    
+    if (is.null(group.by.literal))
+      stop("'group.by.test' not found")
+    
+    group.by.test <- group.by.literal
     if (!is.numeric(group.by.test) && !is.factor(group.by.test) && !is.character(group.by.test))
       stop("'group.by.test' must be coercible to factor type")
-  }  
+
+    if (is.null(group.by.test))
+      stop("'group.by.test' specified but not found")
+  
+    if (!is.numeric(group.by.test) && !is.factor(group.by.test) && !is.character(group.by.test))
+      stop("'group.by.test' must be coercible to factor type")
+  }
   
   if (is.null(matchedCall$prior)) matchedCall$prior <- formals(rbart_vi)$prior
   
@@ -95,9 +117,9 @@ rbart_vi <- function(
     prior <- rbart.priors[[which(names(rbart.priors) == matchedCall$prior)]]
   
   data <- eval(redirectCall(matchedCall, dbarts::dbartsData), envir = callingEnv)
-  
+   
   if (length(group.by) != length(data@y))
-    stop("'group.by' not of length equal to that of data")
+    stop("'group.by' not of length equal to that of data; check for name collisions with `data` argument and calling environment")
   group.by <- droplevels(as.factor(group.by))
   if (!is.null(matchedCall[["group.by.test"]])) {
     if (length(group.by.test) != nrow(data@x.test))
@@ -118,33 +140,68 @@ rbart_vi <- function(
   runSingleThreaded <- n.threads <= 1L || n.chains <= 1L
   if (!runSingleThreaded) {
     tryResult <- tryCatch(cluster <- makeCluster(min(n.threads, n.chains), "PSOCK"), error = function(e) e)
-    if (is(tryResult, "error"))
+    if (inherits(tryResult, "error"))
       tryResult <- tryCatch(cluster <- makeCluster(min(n.threads, n.chains), "FORK"), error = function(e) e)
     
-    if (is(tryResult, "error")) {
+    if (inherits(tryResult, "error")) {
       warning("unable to multithread, defaulting to single: ", tryResult$message)
       runSingleThreaded <- TRUE
     } else {
+      if (!is.na(seed)) {
+        # We draw sequentially from the given seed, one for each thread. To be polite
+        # (more to match bart), we set the seed back when we're are done.
+        oldSeed <- .GlobalEnv[[".Random.seed"]]
+        
+        set.seed(seed)
+        randomSeeds <- sample.int(.Machine$integer.max, n.chains)
+        
+        if (!is.null(oldSeed))
+          .Random.seed <- oldSeed
+      } else {
+        randomSeeds <- rep.int(NA_integer_, n.chains)
+      }
+      
       clusterExport(cluster, "rbart_vi_fit", asNamespace("dbarts"))
       clusterEvalQ(cluster, require(dbarts))
       
       tryResult <- tryCatch(
-        chainResults <- clusterMap(cluster, "rbart_vi_fit", seq_len(n.chains), MoreArgs = namedList(samplerArgs, group.by, prior)))
-    
+        chainResults <- clusterMap(cluster, "rbart_vi_fit", seq_len(n.chains), randomSeeds, MoreArgs = namedList(samplerArgs, group.by, prior)),
+        error = function(e) e)
+      
       stopCluster(cluster)
+      
+      if (inherits(tryResult, "error")) {
+        warning("error running multithreaded, defaulting to single: ", tryResult$message)
+        runSingleThreaded <- TRUE
+      }
     }
   }
 
   if (runSingleThreaded) {
+    if (!is.na(seed)) {
+      # If the seed was passed in, since we're running single threaded everything will draw
+      # from the built-in generator. In that case, we just have to set.seed and set it
+      # back when done.
+      oldSeed <- .GlobalEnv[[".Random.seed"]]
+      set.seed(seed)
+    }
+    
     for (chainNum in seq_len(n.chains))
-      chainResults[[chainNum]] <- rbart_vi_fit(1L, samplerArgs, group.by, prior)
+      chainResults[[chainNum]] <- rbart_vi_fit(1L, NA_integer_, samplerArgs, group.by, prior)
+    
+    if (exists("oldSeed"))
+      .Random.seed <- oldSeed
   }
-  packageRbartResults(control, data, group.by, group.by.test, chainResults, combineChains)
+  packageRbartResults(control, data, group.by, group.by.test, chainResults, combineChains, seed)
 }
 
-rbart_vi_fit <- function(chain.num, samplerArgs, group.by, prior) 
+rbart_vi_fit <- function(chain.num, seed, samplerArgs, group.by, prior) 
 {
   chain.num <- "ignored"
+  
+  if (!is.na(seed))
+    set.seed(seed)
+  
   sampler <- do.call(dbarts::dbarts, samplerArgs)
   sampler$control@call <- samplerArgs$control@call
   
@@ -156,7 +213,7 @@ rbart_vi_fit <- function(chain.num, samplerArgs, group.by, prior)
   sampler$setControl(control)
   
   y <- sampler$data@y
-  rel.scale <- if (!control@binary) sd(y) else 0.50
+  rel.scale <- if (!control@binary) sd(y) else 0.5
   
   g <- as.integer(group.by)
   numRanef <- nlevels(group.by)
@@ -165,7 +222,11 @@ rbart_vi_fit <- function(chain.num, samplerArgs, group.by, prior)
   
   evalEnv <- list2env(list(rel.scale = rel.scale, q = numRanef))
   b.sq <- NULL ## for R CMD check
-  posteriorClosure <- function(x) { ifelse(x <= 0.0 | is.infinite(x), -.Machine$double.xmax * .Machine$double.eps, -q * base::log(x) - 0.5 * b.sq / x^2.0 + prior(x, rel.scale)) }
+  posteriorClosure <- function(x) {
+    ifelse(x <= 0.0 | is.infinite(x),
+           -.Machine$double.xmax * .Machine$double.eps,
+           -q * base::log(x) - 0.5 * b.sq / x^2.0 + prior(x, rel.scale))
+  }
   environment(posteriorClosure) <- evalEnv
   
   offset.orig <- sampler$data@offset
@@ -181,6 +242,11 @@ rbart_vi_fit <- function(chain.num, samplerArgs, group.by, prior)
   yhat.train <- matrix(NA_real_, numObservations, control@n.samples)
   yhat.test  <- matrix(NA_real_, numTestObservations, control@n.samples)
   varcount <- matrix(NA_integer_, ncol(sampler$data@x), control@n.samples)
+  kIsModeled <- inherits(sampler$model@node.hyperprior, "dbartsChiHyperprior")
+  if (kIsModeled) {
+    firstK <- rep(NA_real_, control@n.burn)
+    k <- rep(NA_real_, control@n.samples)
+  }
   
   sampler$sampleTreesFromPrior()
   y.st <- if (!control@binary) y else sampler$getLatents()
@@ -223,6 +289,8 @@ rbart_vi_fit <- function(chain.num, samplerArgs, group.by, prior)
       .Call(C_dbarts_assignInPlace, firstTau, i, tau.i)
       if (!control@binary)
         .Call(C_dbarts_assignInPlace, firstSigma, i, sigma.i)
+      if (kIsModeled)
+        .Call(C_dbarts_assignInPlace, firstK, i, samples$k)
     }
     
     if (control@keepTrees != oldKeepTrees) {
@@ -260,6 +328,8 @@ rbart_vi_fit <- function(chain.num, samplerArgs, group.by, prior)
     .Call(C_dbarts_assignInPlace, yhat.train, i, treeFit.train)
     .Call(C_dbarts_assignInPlace, varcount, i, samples$varcount)
     if (numTestObservations > 0L) .Call(C_dbarts_assignInPlace, yhat.test, i, samples$test)
+    if (kIsModeled)
+        .Call(C_dbarts_assignInPlace, k, i, samples$k) 
     
     if (verbose && i %% control@printEvery == 0L) cat("iter: ", i, "\n", sep = "")
   }
@@ -271,10 +341,15 @@ rbart_vi_fit <- function(chain.num, samplerArgs, group.by, prior)
   
   rownames(ranef) <- levels(group.by)
   
-  namedList(sampler, ranef, firstTau, firstSigma, tau, sigma, yhat.train, yhat.test, varcount)
+  result <- namedList(sampler, ranef, firstTau, firstSigma, tau, sigma, yhat.train, yhat.test, varcount)
+  if (kIsModeled) {
+    result$firstK <- firstK
+    result$k <- k
+  }
+  result
 }
 
-packageRbartResults <- function(control, data, group.by, group.by.test, chainResults, combineChains)
+packageRbartResults <- function(control, data, group.by, group.by.test, chainResults, combineChains, seed)
 {
   n.chains <- length(chainResults)
   
@@ -309,7 +384,7 @@ packageRbartResults <- function(control, data, group.by, group.by.test, chainRes
     if (!responseIsBinary) {
       result$first.sigma <- convertSamplesFromDbartsToBart(sapply(chainResults, function(x) x$firstSigma), n.chains, combineChains)
       result$sigma       <- convertSamplesFromDbartsToBart(sapply(chainResults, function(x) x$sigma), n.chains, combineChains)
-     }
+    }
     result$tau         <- convertSamplesFromDbartsToBart(sapply(chainResults, function(x) x$tau), n.chains, combineChains)
     result$yhat.train  <- convertSamplesFromDbartsToBart(array(sapply(chainResults, function(x) x$yhat.train), c(dim(chainResults[[1L]]$yhat.train), n.chains)),
                                                          n.chains, combineChains)
@@ -317,6 +392,12 @@ packageRbartResults <- function(control, data, group.by, group.by.test, chainRes
                             convertSamplesFromDbartsToBart(array(sapply(chainResults, function(x) x$yhat.test), c(dim(chainResults[[1L]]$yhat.test), n.chains)),
                                            n.chains, combineChains)
     result$varcount    <- convertSamplesFromDbartsToBart(array(sapply(chainResults, function(x) x$varcount), c(dim(chainResults[[1L]]$varcount), n.chains)), n.chains, combineChains)
+    if (!is.null(chainResults[[1L]]$firstK)) {
+      result$first.k <- convertSamplesFromDbartsToBart(sapply(chainResults, function(x) x$firstK), n.chains, combineChains)
+    }
+    if (!is.null(chainResults[[1L]]$k)) {
+      result$k <- convertSamplesFromDbartsToBart(sapply(chainResults, function(x) x$k), n.chains, combineChains)
+    }
   } else {
     result$ranef <- t(chainResults[[1L]]$ranef)
     if (!is.null(group.by.test) && any(unmeasuredLevels <- levels(group.by.test) %not_in% levels(group.by))) {
@@ -337,6 +418,10 @@ packageRbartResults <- function(control, data, group.by, group.by.test, chainRes
     result$yhat.train  <- t(chainResults[[1L]]$yhat.train)
     result$yhat.test   <- if (NROW(chainResults[[1L]]$yhat.test) <= 0L) NULL else t(chainResults[[1L]]$yhat.test)
     result$varcount    <- chainResults[[1L]]$varcount
+    if (!is.null(chainResults[[1L]]$firstK))
+      result$first.k <- chainResults[[1L]]$firstK 
+    if (!is.null(chainResults[[1L]]$k))
+      result$k <- chainResults[[1L]]$k 
   }
   
   result$ranef.mean <- apply(result$ranef, length(dim(result$ranef)), mean)
@@ -348,8 +433,17 @@ packageRbartResults <- function(control, data, group.by, group.by.test, chainRes
   else
     result$n.chains <- n.chains
   
-  if (!exists(".Random.seed", .GlobalEnv)) runif(1L)
-  result$seed <- .GlobalEnv[[".Random.seed"]]
+  if (!is.na(seed)) {
+    oldSeed <- .GlobalEnv[[".Random.seed"]]
+    
+    set.seed(seed)
+    result$seed <- .GlobalEnv$.Random.seed
+    
+    .GlobalEnv$.Random.seed <- oldSeed
+  } else {
+    if (!exists(".Random.seed", .GlobalEnv)) runif(1L)
+    result$seed <- .GlobalEnv$.Random.seed
+  }
   
   class(result) <- "rbart"
   result

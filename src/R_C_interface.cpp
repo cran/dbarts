@@ -196,15 +196,15 @@ extern "C" {
   NormalPrior* dbarts_createNormalPrior() {
     return new NormalPrior;
   }
-  NormalPrior* dbarts_createNormalPriorFromOptions(const Control* control, const Model* model, double k) {
-    return new NormalPrior(*control, *model, k);
+  NormalPrior* dbarts_createNormalPriorFromOptions(const Control* control, const Model* model) {
+    return new NormalPrior(*control, *model);
   }
   void dbarts_destroyNormalPrior(NormalPrior* prior) {
     delete prior;
   }
-  void dbarts_initializeNormalPriorFromOptions(NormalPrior* prior, const Control* control, const Model* model, double k)
+  void dbarts_initializeNormalPriorFromOptions(NormalPrior* prior, const Control* control, const Model* model)
   {
-    new (prior) NormalPrior(*control, *model, k);
+    new (prior) NormalPrior(*control, *model);
   }
   void dbarts_invalidateNormalPrior(NormalPrior* prior) {
     prior->~NormalPrior();
@@ -226,6 +226,24 @@ extern "C" {
   void dbarts_invalidateChiHyperprior(ChiHyperprior* prior) {
     prior->~ChiHyperprior();
   }
+  
+  FixedHyperprior* dbarts_createFixedHyperprior() {
+    return new FixedHyperprior;
+  }
+  FixedHyperprior* dbarts_createFixedHyperpriorFromOptions(double k) {
+    return new FixedHyperprior(k);
+  }
+  void dbarts_destroyFixedHyperprior(FixedHyperprior* prior) {
+    delete prior;
+  }
+  void dbarts_initializeFixedHyperpriorFromOptions(FixedHyperprior* prior, double k)
+  {
+    new (prior) FixedHyperprior(k);
+  }
+  void dbarts_invalidateFixedHyperprior(FixedHyperprior* prior) {
+    prior->~FixedHyperprior();
+  }
+
   
   ChiSquaredPrior* dbarts_createChiSquaredPrior() {
     return new ChiSquaredPrior;

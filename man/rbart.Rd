@@ -23,13 +23,14 @@ rbart_vi(
   n.thin = 5L, keepTrainingFits = TRUE,
   printEvery = 100L, printCutoffs = 0L,
   verbose = TRUE,
-  keepTrees = TRUE, keepCall = TRUE, \dots)
+  keepTrees = TRUE, keepCall = TRUE,
+  seed = NA_integer_,
+  \dots)
 
 \S3method{plot}{rbart}(x, plquants = c(0.05, 0.95), cols = c('blue', 'black'), \dots)
 \S3method{fitted}{rbart}(object,
                          type = c("ev", "ppd", "bart", "ranef"),
                          sample = c("train", "test"),
-                         combineChains = TRUE,
                          \dots)
 \S3method{extract}{rbart}(object,
                           type = c("ev", "ppd", "bart", "ranef"),
@@ -63,7 +64,7 @@ rbart_vi(
   \item{formula, data, test, subset, weights, offset, offset.test, sigest, sigdf, sigquant,
         k, power, base, n.trees, n.samples, n.burn, n.chains, n.threads, combineChains,
         n.cuts, useQuantiles, keepTrainingFits, printEvery, printCutoffs, verbose,
-        keepTrees, keepCall, \dots}{
+        keepTrees, keepCall, seed, \dots}{
     Same as in \code{\link{bart2}}.}
   \item{object}{A fitted \code{rbart} model.}
   \item{newdata}{Same as \code{test}, but named to match \code{\link{predict}} generic.}
@@ -87,7 +88,7 @@ rbart_vi(
 }
 
 For binary outcomes the response model is changed to \eqn{P(Y_i = 1) = \Phi(f(x_i) + \alpha_{g[i]})}. \eqn{i} indexes observations, \eqn{g[i]} is the group index of observation \eqn{i}, \eqn{f(x)} and
-  \eqn{\sigma_y} come from a BART model, and \eqn{\alpha_j} are the independent and identically distributed random intercepts.
+  \eqn{\sigma_y} come from a BART model, and \eqn{\alpha_j} are the independent and identically distributed random intercepts. Draws from the posterior of \eqn{tau} are made using a slice sampler, with a width dynamically determined by assessing the curvature of the posterior distribution at its mode.
 
 \subsection{Out Of Sample Groups}{
   Predicting random effects for groups not in the training sample is supported by sampling

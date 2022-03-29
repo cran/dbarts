@@ -398,7 +398,14 @@ namespace dbarts {
       size_t* columns = misc_stackAllocate(data.numPredictors, size_t);
       for (size_t i = 0; i < data.numPredictors; ++i) columns[i] = i;
       
+#if defined(__GNUC__) && !defined(__clang__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6))
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
       ::setCutPoints(*this, columns, data.numPredictors);
+#if defined(__GNUC__) && !defined(__clang__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6))
+#  pragma GCC diagnostic pop
+#endif
       
       misc_stackFree(columns);
     }
@@ -1253,7 +1260,7 @@ extern "C" {
     size_t chainNum = threadData->chainNum;
     size_t numBurnIn = threadData->numBurnIn;
     Results& results(*threadData->results);
-    
+
     Control& control(fit.control);
     Model& model(fit.model);
     Data& data(fit.data);
@@ -1470,6 +1477,13 @@ namespace dbarts {
     
     CGMPrior* treePrior = static_cast<CGMPrior*>(model.treePrior);
     ext_printf("\tpower and base for tree prior: %f %f\n", treePrior->power, treePrior->base);
+    if (treePrior->splitProbabilities != NULL) {
+      ext_printf("\ttree split probabilities: %f", treePrior->splitProbabilities[0]);
+      size_t printLength = 5 < data.numPredictors ? 5 : data.numPredictors;
+      for (size_t i = 1; i < printLength; ++i)
+        ext_printf(", %f", treePrior->splitProbabilities[i]);
+      ext_printf("\n");
+    }
     ext_printf("\tuse quantiles for rule cut points: %s\n", control.useQuantiles ? "true" : "false");
     ext_printf("\tproposal probabilities: birth/death %.2f, swap %.2f, change %.2f; birth %.2f\n",
       model.birthOrDeathProbability, model.swapProbability, model.changeProbability, model.birthProbability);
@@ -1844,10 +1858,14 @@ namespace {
     ext_rng_algorithm_t rng_algorithm = static_cast<ext_rng_algorithm_t>(control.rng_algorithm);
     ext_rng_standardNormal_t rng_standardNormal = static_cast<ext_rng_standardNormal_t>(control.rng_standardNormal);
     
+    // If running multi-threaded and a seed was specified, create a generator
+    // that will be used to generate seeds for the thread-specific generators.
     ext_rng* seedGenerator = NULL;
     if (control.rng_seed != DBARTS_CONTROL_INVALID_SEED && !useNativeRNG) {
       if (rng_algorithm == EXT_RNG_ALGORITHM_INVALID) {
-        seedGenerator = ext_rng_createDefault(FALSE);
+        // We can use the built-in here, because we are running single-threaded
+        // at this point.
+        seedGenerator = ext_rng_createDefault(true);
       } else {
         seedGenerator = ext_rng_create(rng_algorithm, NULL);
       }
@@ -1859,7 +1877,6 @@ namespace {
         errorMessage = "could not seed rng";
         goto createRNG_cleanup;
       }
-      ext_rng_setSeed(seedGenerator, control.rng_seed);
     }
     
     for ( /* */ ; chainNum < control.numChains; ++chainNum) {
@@ -1889,7 +1906,10 @@ namespace {
         // we are running sequentially and the (single-threaded) built-in generator 
         // will be used for everything.
         if (control.rng_seed != DBARTS_CONTROL_INVALID_SEED && chainNum == 0) {
-          if (ext_rng_setSeed(state[chainNum].rng, control.rng_seed) != 0) { errorMessage = "could not seed rng"; goto createRNG_cleanup; }
+          if (ext_rng_setSeed(state[chainNum].rng, control.rng_seed) != 0) {
+            errorMessage = "could not seed rng";
+            goto createRNG_cleanup;
+          }
         }
       } else {
         // If not using supplied generator, seed created ones
@@ -2124,15 +2144,15 @@ namespace {
     if (!model.kPrior->isFixed)
       results.kSamples[simNum + chainStride] = k;
     
-    double* variableCountSamples = results.variableCountSamples + (simNum + chainStride) * data.numPredictors;
-    for (size_t j = 0; j < data.numPredictors; ++j) variableCountSamples[j] = static_cast<double>(variableCounts[j]);
+    uint32_t* variableCountSamples = results.variableCountSamples + (simNum + chainStride) * data.numPredictors;
+    for (size_t j = 0; j < data.numPredictors; ++j) variableCountSamples[j] = variableCounts[j];
   }
   
   
   void countVariableUses(const BARTFit& fit, const State& state, uint32_t* variableCounts)
   {
     for (size_t treeNum = 0; treeNum < fit.control.numTrees; ++treeNum)
-      state.trees[treeNum ].countVariableUses(variableCounts);
+      state.trees[treeNum].countVariableUses(variableCounts);
   }
 
 #ifdef HAVE_GETTIMEOFDAY

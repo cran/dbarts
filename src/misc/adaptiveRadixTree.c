@@ -51,9 +51,8 @@
 
 #include <external/io.h>
 
-#if defined(__GNUC__) && (\
-  (!defined(__clang__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6))) || \
-  ( defined(__clang__) && (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 7))))
+#if (defined(__clang__) && (__clang_major__ > 3 || (__clang_major__ == 3 && __clang_minor__ >= 7))) || \
+    (defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)))
 #  define SUPPRESS_DIAGNOSTIC 1
 #endif
 
@@ -540,7 +539,7 @@ static Node** findChildMatchingKey(const Node* n, uint8_t c)
     case NODE16:
     {
       p.p2 = (const Node16*) n;
-#ifdef __SSE2__
+#if defined(HAVE_SSE2) && defined(__SSE2__)
       __m128i comparison = _mm_cmpeq_epi8(_mm_set1_epi8(c), _mm_loadu_si128((__m128i*) p.p2->keys));
       
       unsigned int bitfield = ((1 << n->numChildren) - 1) & (unsigned int) _mm_movemask_epi8(comparison);
@@ -749,7 +748,7 @@ static int addChild4(Node4* restrict n, uint8_t c, void* restrict child, Node* r
   return addChild16(newNode, c, child, positionInParent);
 }
 
-#ifdef __SSE2__
+#if defined(HAVE_SSE2) && defined(__SSE2__)
 #  define _mm_cmpgt_epu8(a, b) _mm_cmpgt_epi8(_mm_add_epi8(a, _mm_set1_epi16((uint8_t) 0x80u)), \
                                               _mm_add_epi8(b, _mm_set1_epi8((uint8_t) 0x80u)))
 #  define _mm_cmplt_epu8(a, b) _mm_cmpgt_epu8(b, a)
@@ -764,7 +763,7 @@ static int addChild16(Node16* restrict n, uint8_t c, void* restrict child, Node*
 
     unsigned int bitfield = 0;
 // __SSE2__ supported by default on x86_64, which should be good enough
-#ifdef __SSE2__
+#if defined(HAVE_SSE2) && defined(__SSE2__)
     // Compare the key to all 16 stored keys
     __m128i comparison = _mm_cmplt_epu8(_mm_set1_epi8(c), _mm_loadu_si128((__m128i*) n->keys));
     bitfield = ((1 << n->n.numChildren) - 1) & _mm_movemask_epi8(comparison);
@@ -809,7 +808,7 @@ static int addChild16(Node16* restrict n, uint8_t c, void* restrict child, Node*
   return addChild48(newNode, c, child, positionInParent);
 }
 
-#ifdef __SSE2__
+#if defined(HAVE_SSE2) && defined(__SSE2__)
 #  undef _mm_cmple_epu8
 #  undef _mm_cmpge_epu8
 #  undef _mm_cmplt_epu8

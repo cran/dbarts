@@ -1,6 +1,37 @@
 \name{NEWS}
 \title{dbarts News}
 \encoding{UTF-8}
+\section{CHANGES IN VERSION 0.9-21}{
+  \subsection{NEW FEATURES}{
+    \itemize{
+      \item \code{extract} now accepts as a type \code{"trees"}, which
+            allows for easier inspection of models fit with
+            \code{"keepTrees"} as \code{TRUE}.
+      \item \code{print} generics now exist for \code{bart} and \code{rbart}
+            fits; implementation thanks to Emil Hvitfeldt.
+      \item \code{xbart} now accepts a \code{seed} argument to enhance
+            reproducibility.
+      \item \code{bart}/\code{bart2} (and \code{dbarts} through its
+            \code{tree.prior} argument) accept \code{splitprobs}/
+            \code{split.probs} which controls the prior probability that any
+            variable is used when splitting observations.
+    }
+  }
+  \subsection{USER-VISIBLE CHANGES}{
+    \itemize{
+      \item \code{fitted} for \code{rbart_vi} models now uses a C++
+            implementation for the expected value that uses less memory
+            and is faster.
+    }
+  }
+  \subsection{BUG FIXES}{
+    \itemize{
+      \item \code{xbart} for binary outcomes with log loss no longer returns
+            NaN when some subset of the response is perfectly predicted by the
+            covariates. Bug report thanks to Marcela Veselkova.
+    }
+  }
+}
 \section{CHANGES IN VERSION 0.9-20}{
   \subsection{NEW FEATURES}{
     \itemize{

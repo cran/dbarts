@@ -3,7 +3,9 @@
 
 #include <algorithm> // sort
 #include <cstddef> // size_t
+#include <dbarts/cstdint.hpp> // uint_least32_t
 #include <cmath>   // sqrt, floor
+#include <errno.h>
 
 #include <misc/alloca.h>
 #include <misc/thread.h>
@@ -35,7 +37,7 @@ namespace {
     double k;
     double power;
     double base;
-    uint8_t status;
+    std::uint8_t status;
   };
   
   void updateFitForCell(BARTFit& fit, Control& repControl, Model& repModel, const CellParameters& parameters,
@@ -71,6 +73,28 @@ namespace {
     
     double* results;
   };
+  
+  ext_rng* createSingleThreadedRNG(
+    ext_rng_algorithm_t rng_algorithm,
+    ext_rng_standardNormal_t rng_standardNormal,
+    std::uint_least32_t rng_seed,
+    const char*& errorMessage);
+  
+  ext_rng* createMultiThreadedRNG(
+    ext_rng_algorithm_t rng_algorithm,
+    ext_rng_standardNormal_t rng_standardNormal,
+    ext_rng* seedGenerator,
+    const char*& errorMessage);
+  
+  ext_rng* createSeedRNG(
+    ext_rng_algorithm_t rng_algorithm,
+    std::uint_least32_t rng_seed,
+    const char*& errorMessage);
+  
+  bool ensureRNGSeedsAreUnique(
+    const ext_rng* rng_1,
+    ext_rng* rng_2,
+    ext_rng* seedGenerator);
 }
 
 extern "C" { static void crossvalidationTask(void* data); }
@@ -81,7 +105,7 @@ namespace dbarts { namespace xval {
                        Method method, sizetOrDouble testSampleSize, size_t numReps,
                        size_t numInitialBurnIn, size_t numContextShiftBurnIn, size_t numRepBurnIn,
                        const LossFunctorDefinition& lossFunctorDef, size_t numThreads,
-                       const std::size_t* nTrees, size_t numNTrees, const double* k, size_t numKs,
+                       const size_t* nTrees, size_t numNTrees, const double* k, size_t numKs,
                        const double* power, size_t numPowers, const double* base, size_t numBases,
                        double* results)
 
@@ -138,33 +162,35 @@ namespace dbarts { namespace xval {
                               lossFunctorDef, numReps, cellParameters };
     ext_rng_algorithm_t rng_algorithm = static_cast<ext_rng_algorithm_t>(threadControl.rng_algorithm);
     ext_rng_standardNormal_t rng_standardNormal = static_cast<ext_rng_standardNormal_t>(threadControl.rng_standardNormal);
-    
+    std::uint_least32_t rng_seed = threadControl.rng_seed;
     threadControl.rng_algorithm = RNG_ALGORITHM_USER_POINTER;
     
     if (numThreads <= 1) {
-      ext_rng* rng;
+      // Compiler complains that errorMessage may be unitialized unless I set it
+      // explicitly. I have no idea how that could be the case.
+      const char* errorMessage = "";
+      ext_rng* rng = createSingleThreadedRNG(
+        rng_algorithm, rng_standardNormal, rng_seed, errorMessage);
       
-      // both BART sampler and xval algorithm can use native sampler
-      if (rng_algorithm == EXT_RNG_ALGORITHM_INVALID &&
-          rng_standardNormal == EXT_RNG_STANDARD_NORMAL_INVALID) {
-        
-        if ((rng = ext_rng_createDefault(true)) == NULL)
-          ext_throwError("could not allocate rng");
-      } else {
-        if (ext_rng_createAndSeed(&rng, rng_algorithm, rng_standardNormal) != 0)
-          ext_throwError("could not allocate rng");
+      if (rng == NULL) {
+        delete [] cellParameters;
+        ext_throwError(errorMessage);
       }
-      
+
       ThreadData threadData = { &sharedData, rng, 0, numRepCells, 0, results };
       
       crossvalidationTask(&threadData);
       
       ext_rng_destroy(rng);
     } else {
-      if (rng_algorithm == EXT_RNG_ALGORITHM_INVALID)
-        rng_algorithm = ext_rng_getDefaultAlgorithmType();
-      if (rng_standardNormal == EXT_RNG_STANDARD_NORMAL_INVALID)
-        rng_standardNormal = ext_rng_getDefaultStandardNormalType();
+      ext_rng* seedGenerator = NULL;
+      const char* errorMessage;
+      if (rng_seed != DBARTS_CONTROL_INVALID_SEED &&
+          (seedGenerator = createSeedRNG(rng_algorithm, rng_seed, errorMessage)) == NULL)
+      {
+        delete [] cellParameters;
+        ext_throwError(errorMessage);
+      }
       
       misc_btm_manager_t threadManager;
       misc_btm_create(&threadManager, numThreads);
@@ -174,14 +200,30 @@ namespace dbarts { namespace xval {
       size_t offByOneIndex;
       
       misc_btm_getNumThreadsForJob(threadManager, numRepCells, 0, NULL, &numRepCellsPerThread, &offByOneIndex);
-      
+
       
       ThreadData* threadData = misc_stackAllocate(numThreads, ThreadData);
       void** threadDataPtrs  = misc_stackAllocate(numThreads, void*);
       for (size_t i = 0; i < offByOneIndex; ++i) {
         threadData[i].shared = &sharedData;
-        if (ext_rng_createAndSeed(&threadData[i].rng, rng_algorithm, rng_standardNormal) != 0)
-          ext_throwError("could not allocate rng");
+        threadData[i].rng = createMultiThreadedRNG(
+          rng_algorithm,
+          rng_standardNormal,
+          seedGenerator,
+          errorMessage);
+        if (threadData[i].rng == NULL) {
+          for (size_t j = i; j > 0; --j) ext_rng_destroy(threadData[j - 1].rng);
+          if (seedGenerator != NULL) ext_rng_destroy(seedGenerator);
+          delete [] cellParameters;
+          ext_throwError(errorMessage);
+        }
+        if (i > 0 && !ensureRNGSeedsAreUnique(threadData[i - 1].rng, threadData[i].rng, seedGenerator)) {
+          ext_rng_destroy(threadData[i].rng);
+          for (size_t j = i; j > 0; --j) ext_rng_destroy(threadData[j - 1].rng);
+          if (seedGenerator != NULL) ext_rng_destroy(seedGenerator);
+          delete [] cellParameters;
+          ext_throwError("unable to ensure seed uniqueness");
+        }
         threadData[i].repCellOffset = i * numRepCellsPerThread;
         threadData[i].numRepCells   = numRepCellsPerThread;
         threadData[i].threadId = i;
@@ -191,14 +233,32 @@ namespace dbarts { namespace xval {
       
       for (size_t i = offByOneIndex; i < numThreads; ++i) {
         threadData[i].shared = &sharedData;
-        if (ext_rng_createAndSeed(&threadData[i].rng, rng_algorithm, rng_standardNormal) != 0)
-          ext_throwError("could not allocate rng");
+        threadData[i].rng = createMultiThreadedRNG(
+          rng_algorithm,
+          rng_standardNormal,
+          seedGenerator,
+          errorMessage);
+        if (threadData[i].rng == NULL) {
+          for (size_t j = i; j > 0; --j) ext_rng_destroy(threadData[j - 1].rng);
+          if (seedGenerator != NULL) ext_rng_destroy(seedGenerator);
+          delete [] cellParameters;
+          ext_throwError(errorMessage);
+        }
+        if (i > 0 && !ensureRNGSeedsAreUnique(threadData[i - 1].rng, threadData[i].rng, seedGenerator)) {
+          ext_rng_destroy(threadData[i].rng);
+          for (size_t j = i; j > 0; --j) ext_rng_destroy(threadData[j - 1].rng);
+          if (seedGenerator != NULL) ext_rng_destroy(seedGenerator);
+          delete [] cellParameters;
+          ext_throwError("unable to ensure seed uniqueness");
+        }
         threadData[i].repCellOffset = offByOneIndex * numRepCellsPerThread + (i - offByOneIndex) * (numRepCellsPerThread - 1);
         threadData[i].numRepCells   = numRepCellsPerThread - 1;
         threadData[i].threadId = i;
         threadData[i].results = results + threadData[i].repCellOffset * lossFunctorDef.numResults;
         threadDataPtrs[i] = threadData + i;
       }
+      
+      if (seedGenerator != NULL) ext_rng_destroy(seedGenerator);
       
       misc_btm_runTasks(threadManager, crossvalidationTask, threadDataPtrs, numThreads);
       
@@ -338,7 +398,7 @@ extern "C" {
                     new double[numSamples],
                     new double[maxNumTrainingObservations * numSamples],
                     suppliedTestSamples,
-                    new double[origData.numPredictors * numSamples],
+                    new std::uint32_t[origData.numPredictors * numSamples],
                     origModel.kPrior != NULL ? new double[numSamples] : NULL);
     
     Control repControl = origControl;
@@ -721,6 +781,7 @@ namespace {
     const CGMPrior* oldTreePrior = static_cast<CGMPrior*>(origModel.treePrior);
     repTreePrior->base = oldTreePrior->base;
     repTreePrior->power = oldTreePrior->power;
+    repTreePrior->splitProbabilities = oldTreePrior->splitProbabilities;
     
     repModel.treePrior = repTreePrior;
     
@@ -847,3 +908,186 @@ namespace {
   }
 }
 
+namespace {
+  ext_rng* createSingleThreadedRNG(
+    ext_rng_algorithm_t rng_algorithm,
+    ext_rng_standardNormal_t rng_standardNormal,
+    std::uint_least32_t rng_seed,
+    const char*& errorMessage)
+  {
+    ext_rng* result;
+    if (rng_algorithm == EXT_RNG_ALGORITHM_INVALID &&
+        rng_standardNormal == EXT_RNG_STANDARD_NORMAL_INVALID)
+    {
+      if ((result = ext_rng_createDefault(true)) == NULL) {
+        // Use built-in
+        errorMessage = "could not allocate rng";
+        return NULL;
+      }
+      if (rng_seed != DBARTS_CONTROL_INVALID_SEED && ext_rng_setSeed(result, rng_seed) != 0) {
+        // Set seed if specified
+        errorMessage = "could not seed rng";
+        ext_rng_destroy(result);
+        return NULL;
+      }
+      return result;
+    }
+    // Use custom
+    if (rng_algorithm == EXT_RNG_ALGORITHM_INVALID)
+      rng_algorithm = ext_rng_getDefaultAlgorithmType();
+    if (rng_standardNormal == EXT_RNG_STANDARD_NORMAL_INVALID)
+      rng_standardNormal = ext_rng_getDefaultStandardNormalType();
+    
+    if (rng_algorithm == EXT_RNG_ALGORITHM_USER_UNIFORM) {
+      errorMessage = "cannot create rng with user-specified uniform distribution function";
+      return NULL;
+    }
+    
+    if (rng_standardNormal == EXT_RNG_STANDARD_NORMAL_USER_NORM) {
+      errorMessage = "cannot create rng with user-specified normal distribution function";
+      return NULL;
+    }
+    
+    if (rng_seed == DBARTS_CONTROL_INVALID_SEED) {
+      // No need to use a custom seed
+      int errorCode = ext_rng_createAndSeed(&result, rng_algorithm, rng_standardNormal);
+      if (errorCode == ENOMEM) {
+        errorMessage = "could not allocate rng";
+        return NULL;
+      }
+      if (errorCode == EINVAL) {
+        errorMessage = "failure to set standard normal type or possibly seed";
+        return NULL;
+      }
+      if (errorCode != 0) {
+        errorMessage = "unknown error trying to create rng";
+        return NULL;
+      }
+    } else {
+      // Create first, then set seed
+      if ((result = ext_rng_create(rng_algorithm, NULL)) == NULL) {
+        errorMessage = "could not allocate rng";
+        return NULL;
+      }
+      
+      if (ext_rng_setStandardNormalAlgorithm(result, rng_standardNormal, NULL) != 0) {
+        errorMessage = "could not set rng standard normal";
+        ext_rng_destroy(result);
+        return NULL;
+      }
+      if (ext_rng_setSeed(result, rng_seed) != 0) {
+        errorMessage = "could not seed rng";
+        ext_rng_destroy(result);
+        return NULL;
+      }
+    }
+    
+    return result;
+  }
+
+  ext_rng* createMultiThreadedRNG(
+    ext_rng_algorithm_t rng_algorithm,
+    ext_rng_standardNormal_t rng_standardNormal,
+    ext_rng* seedGenerator,
+    const char*& errorMessage)
+  {
+    ext_rng* result = NULL;
+    if (rng_algorithm == EXT_RNG_ALGORITHM_INVALID &&
+        rng_standardNormal == EXT_RNG_STANDARD_NORMAL_INVALID) {
+      if ((result = ext_rng_createDefault(false)) == NULL) {
+        errorMessage = "could not allocate rng";
+        return NULL;
+      }
+    } else {
+      if (rng_algorithm == EXT_RNG_ALGORITHM_INVALID)
+        rng_algorithm = ext_rng_getDefaultAlgorithmType();
+      if (rng_standardNormal == EXT_RNG_STANDARD_NORMAL_INVALID)
+        rng_standardNormal = ext_rng_getDefaultStandardNormalType();
+      
+      if (rng_algorithm == EXT_RNG_ALGORITHM_USER_UNIFORM) {
+        errorMessage = "cannot create rng with user-specified uniform distribution function";
+        return NULL;
+      }
+
+      if (rng_standardNormal == EXT_RNG_STANDARD_NORMAL_USER_NORM) {
+        errorMessage = "cannot create rng with user-specified normal distribution function";
+        return NULL;
+      }
+      
+      if ((result = ext_rng_create(rng_algorithm, NULL)) == NULL) {
+        errorMessage = "could not allocate rng";
+        return NULL;
+      }
+
+      if (ext_rng_setStandardNormalAlgorithm(result, rng_standardNormal, NULL) != 0) {
+        errorMessage = "could not set rng standard normal";
+        ext_rng_destroy(result);
+        return NULL;
+      }
+    }
+    
+    if (seedGenerator != NULL) {
+      std::uint_least32_t seed = static_cast<std::uint_least32_t>(ext_rng_simulateUnsignedIntegerUniformInRange(seedGenerator, 0, static_cast<std::uint_least32_t>(-1)));
+      if (ext_rng_setSeed(result, seed) != 0) {
+        errorMessage = "could not seed rng";
+        ext_rng_destroy(result);
+        return NULL;
+      }
+    } else {
+      if (ext_rng_setSeedFromClock(result) != 0) {
+        errorMessage = "could not seed rng";
+        ext_rng_destroy(result);
+        return NULL;
+      }
+    }
+
+    return result;
+  }
+  
+  ext_rng* createSeedRNG(
+    ext_rng_algorithm_t rng_algorithm,
+    std::uint_least32_t rng_seed,
+    const char*& errorMessage)
+  {
+    ext_rng* rng = NULL;
+    if (rng_algorithm == EXT_RNG_ALGORITHM_INVALID) {
+      rng = ext_rng_createDefault(false);
+    } else {
+      if (rng_algorithm == EXT_RNG_ALGORITHM_USER_UNIFORM) {
+        errorMessage = "cannot create rng with user-specified uniform distribution function";
+        return NULL;
+      }
+      
+      rng = ext_rng_create(rng_algorithm, NULL);
+    }
+    if (rng == NULL) {
+      errorMessage = "could not allocate rng";
+      return NULL;
+    }
+    if (ext_rng_setSeed(rng, rng_seed) != 0) {
+      errorMessage = "could not seed rng";
+      ext_rng_destroy(rng);
+      return NULL;
+    }
+    return rng;
+  }
+
+  bool ensureRNGSeedsAreUnique(const ext_rng* rng_1, ext_rng* rng_2, ext_rng* seedGenerator)
+  {
+    size_t numSeedResets;
+    for (numSeedResets = 0; numSeedResets < static_cast<size_t>(-1); ++numSeedResets) {
+      if (!ext_rng_seedsAreEqual(rng_1, rng_2)) return true;
+      if (seedGenerator != NULL) {
+        if (ext_rng_setSeed(rng_2, static_cast<std::uint_least32_t>(ext_rng_simulateUnsignedIntegerUniformInRange(seedGenerator, 0, static_cast<std::uint_least32_t>(-1)))) != 0)
+          return false;
+      } else {
+        if (ext_rng_setSeedFromClock(rng_2) != 0)
+          return false;
+      }
+    }
+    
+    if (!ext_rng_seedsAreEqual(rng_1, rng_2)) return true;
+
+    return false;
+  }
+}

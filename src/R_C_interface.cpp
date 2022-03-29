@@ -61,17 +61,17 @@ extern "C" {
     invalidateData(*data);
   }
   
-  dbarts::Model* dbarts_createModel(SEXP modelExpr, dbarts::Control* control) {
+  dbarts::Model* dbarts_createModel(SEXP modelExpr, const dbarts::Control* control, const dbarts::Data* data) {
     Model* result = new Model(control->responseIsBinary);
-    initializeModelFromExpression(*result, modelExpr, *control);
+    initializeModelFromExpression(*result, modelExpr, *control, *data);
     return result;
   }
   void dbarts_destroyModel(dbarts::Model* model) {
     invalidateModel(*model);
     delete model;
   }
-  void dbarts_initializeModel(dbarts::Model* model, SEXP modelExpr, const dbarts::Control* control) {
-    initializeModelFromExpression(*model, modelExpr, *control);
+  void dbarts_initializeModel(dbarts::Model* model, SEXP modelExpr, const dbarts::Control* control, const dbarts::Data* data) {
+    initializeModelFromExpression(*model, modelExpr, *control, *data);
   }
   void dbarts_invalidateModel(dbarts::Model* model) {
     invalidateModel(*model);
@@ -91,12 +91,25 @@ extern "C" {
     fit->printInitialSummary();
   }
   void dbarts_printTrees(const dbarts::BARTFit* fit,
-                         const std::size_t* chains, std::size_t numChains,
-                         const std::size_t* samples, std::size_t numSamples,
-                         const std::size_t* indices, std::size_t numIndices)
+                         const std::size_t* chainIndices,  std::size_t numChainIndices,
+                         const std::size_t* sampleIndices, std::size_t numSampleIndices,
+                         const std::size_t* treeIndices,   std::size_t numTreeIndices)
   {
-    fit->printTrees(chains, numChains, samples, numSamples, indices, numIndices);
+    fit->printTrees(chainIndices,  numChainIndices,
+                    sampleIndices, numSampleIndices,
+                    treeIndices,   numTreeIndices);
   }
+
+  FlattenedTrees* dbarts_getTrees(const dbarts::BARTFit* fit,
+                                  const std::size_t* chainIndices,  std::size_t numChainIndices,
+                                  const std::size_t* sampleIndices, std::size_t numSampleIndices,
+                                  const std::size_t* treeIndices,   std::size_t numTreeIndices)
+  {
+    return fit->getFlattenedTrees(chainIndices,  numChainIndices,
+                                  sampleIndices, numSampleIndices,
+                                  treeIndices,   numTreeIndices);
+  }
+
   Results* dbarts_runSampler(BARTFit* fit) {
     return fit->runSampler();
   }
@@ -179,15 +192,15 @@ extern "C" {
   CGMPrior* dbarts_createCGMPrior() {
     return new CGMPrior;
   }
-  CGMPrior* dbarts_createCGMPriorFromOptions(double base, double power) {
-    return new CGMPrior(base, power);
+  CGMPrior* dbarts_createCGMPriorFromOptions(double base, double power, const double* splitProbabilities) {
+    return new CGMPrior(base, power, splitProbabilities);
   }
   void dbarts_destroyCGMPrior(CGMPrior* prior) {
     delete prior;
   }
-  void dbarts_initializeCGMPriorFromOptions(CGMPrior* prior, double base, double power)
+  void dbarts_initializeCGMPriorFromOptions(CGMPrior* prior, double base, double power, const double* splitProbabilities)
   {
-    new (prior) CGMPrior(base, power);
+    new (prior) CGMPrior(base, power, splitProbabilities);
   }
   void dbarts_invalidateCGMPrior(CGMPrior* prior) {
     prior->~CGMPrior();

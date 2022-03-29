@@ -78,6 +78,17 @@ namespace dbarts {
     
     delete fit;
   }
+
+#if defined(__clang__)
+#  if __has_warning("-Wenum-enum-conversion")
+#    define SUPPRESS_ENUM_CONVERSION_WARNING 1
+#  endif
+#endif
+
+#ifdef SUPPRESS_ENUM_CONVERSION_WARNING
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wenum-enum-conversion"
+#endif
   
   void initializeControlFromExpression(Control& control, SEXP controlExpr)
   {
@@ -132,7 +143,6 @@ namespace dbarts {
     if (i_temp == NA_INTEGER) i_temp = 0;
     control.printCutoffs = static_cast<uint32_t>(i_temp);
     
-
     slotExpr = Rf_getAttrib(controlExpr, Rf_install("rngKind"));
     size_t slotLength = rc_getLength(slotExpr);
     if (slotLength != 1) Rf_error("slot 'rngKind' must be of length 1");
@@ -165,6 +175,11 @@ namespace dbarts {
     if (i_temp == NA_INTEGER) i_temp = DBARTS_CONTROL_INVALID_SEED;
     control.rng_seed = static_cast<uint_least32_t>(i_temp);
   }
+  
+#ifdef SUPPRESS_ENUM_CONVERSION_WARNING
+#  pragma clang diagnostic pop
+#endif
+  
 }
 
 namespace {
@@ -185,7 +200,13 @@ namespace {
 }
 
 namespace dbarts {
-  void initializeModelFromExpression(Model& model, SEXP modelExpr, const Control& control)
+  
+#ifdef SUPPRESS_ENUM_CONVERSION_WARNING
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wenum-enum-conversion"
+#endif
+  
+  void initializeModelFromExpression(Model& model, SEXP modelExpr, const Control& control, const Data& data)
   {
     int errorCode;
     size_t priorType;
@@ -234,7 +255,24 @@ namespace dbarts {
     treePrior->base =
       rc_getDouble(slotExpr, "tree prior base", RC_LENGTH | RC_EQ, rc_asRLength(1),
                    RC_VALUE | RC_GT, 0.0, RC_VALUE | RC_LT, 1.0, RC_END);
-    
+
+    slotExpr = Rf_getAttrib(priorExpr, Rf_install("splitProbabilities"));
+    if (rc_getLength(slotExpr) == 0) {
+      treePrior->splitProbabilities = NULL;
+    } else {
+      treePrior->splitProbabilities = REAL(slotExpr);
+      size_t numPredictors = data.numPredictors;
+      if (rc_getLength(slotExpr) != numPredictors)
+        Rf_error("length of split probabilities must equal number of predictors");
+      double totalProbability = 0.0;
+      for (size_t i = 0; i < numPredictors; ++i) {
+        if (treePrior->splitProbabilities[i] < 0.0)
+          Rf_error("split probabilities must be non-negative");
+        totalProbability += treePrior->splitProbabilities[i];
+      }
+      if (std::fabs(totalProbability - 1.0) >= 1.0e-10)
+        Rf_error("split probabilities must sum to 1.0");
+    }
     
     // not currently used
     // priorExpr = Rf_getAttrib(modelExpr, Rf_install("node.prior"));
@@ -308,6 +346,10 @@ namespace dbarts {
     model.treePrior    = stackModel.treePrior;    stackModel.treePrior = NULL;
   }
   
+#ifdef SUPPRESS_ENUM_CONVERSION_WARNING
+#  pragma clang diagnostic pop
+#endif
+  
   void invalidateModel(Model& model)
   {
     if (model.kPrior != NULL) {
@@ -328,12 +370,18 @@ namespace {
     
     DataStackDeconstructor() : variableTypes(NULL) { }
     ~DataStackDeconstructor() {
-      delete variableTypes;
+      delete [] variableTypes;
     }
   };
 }
 
 namespace dbarts {
+  
+#ifdef SUPPRESS_ENUM_CONVERSION_WARNING
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wenum-enum-conversion"
+#endif
+  
   void initializeDataFromExpression(Data& data, SEXP dataExpr)
   {
     DataStackDeconstructor stackData;
@@ -412,6 +460,11 @@ namespace dbarts {
     
     stackData.variableTypes = NULL;
   }
+  
+#ifdef SUPPRESS_ENUM_CONVERSION_WARNING
+#  pragma clang diagnostic pop
+#  undef SUPPRESS_ENUM_CONVERSION_WARNING
+#endif
   
   void invalidateData(Data& data)
   {
@@ -683,4 +736,5 @@ namespace dbarts {
     fit.rebuildScratchFromState();
   }
 }
+
 

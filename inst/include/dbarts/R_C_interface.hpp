@@ -44,6 +44,8 @@ namespace dbarts {
   
   struct BARTFit;
   struct Results;
+
+  struct FlattenedTrees;
 }
 
 // pair calls of create<->destroy, initialize<->invalidate
@@ -60,9 +62,9 @@ extern "C" {
   void dbarts_initializeData(dbarts::Data* data, SEXP dataExpr);
   void dbarts_invalidateData(dbarts::Data* data);
   
-  dbarts::Model* dbarts_createModel(SEXP modelExpr, dbarts::Control* control);
+  dbarts::Model* dbarts_createModel(SEXP modelExpr, const dbarts::Control* control, const dbarts::Data* data);
   void dbarts_destroyModel(dbarts::Model* model);
-  void dbarts_initializeModel(dbarts::Model* model, SEXP modelExpr, const dbarts::Control* control);
+  void dbarts_initializeModel(dbarts::Model* model, SEXP modelExpr, const dbarts::Control* control, const dbarts::Data* data);
   void dbarts_invalidateModel(dbarts::Model* model);
   
   dbarts::BARTFit* dbarts_createFit(dbarts::Control* control, dbarts::Model* model, dbarts::Data* data);
@@ -77,9 +79,13 @@ extern "C" {
   
   void dbarts_printInitialSummary(const dbarts::BARTFit* fit);
   void dbarts_printTrees(const dbarts::BARTFit* fit,
-                         const std::size_t* chains,  std::size_t numChains,
-                         const std::size_t* samples, std::size_t numSamples,
-                         const std::size_t* indices, std::size_t numIndices);
+                         const std::size_t* chainIndices,  std::size_t numChainIndices,
+                         const std::size_t* sampleIndices, std::size_t numSampleIndices,
+                         const std::size_t* treeIndices, std::size_t numTreeIndices);
+  dbarts::FlattenedTrees* dbarts_getTrees(const dbarts::BARTFit* fit,
+                                          const std::size_t* chainIndices,  std::size_t numChainIndices,
+                                          const std::size_t* sampleIndices, std::size_t numSampleIndices,
+                                          const std::size_t* treeIndices, std::size_t numTreeIndices);
   
   dbarts::Results* dbarts_runSampler(dbarts::BARTFit* fit);
   dbarts::Results* dbarts_runSamplerForIterations(dbarts::BARTFit* fit, std::size_t numBurnIn, std::size_t numSamples);
@@ -116,9 +122,9 @@ extern "C" {
   void dbarts_storeLatents(const dbarts::BARTFit* fit, double* target);
     
   dbarts::CGMPrior* dbarts_createCGMPrior();
-  dbarts::CGMPrior* dbarts_createCGMPriorFromOptions(double base, double power);
+  dbarts::CGMPrior* dbarts_createCGMPriorFromOptions(double base, double power, const double* splitProbabilities);
   void dbarts_destroyCGMPrior(dbarts::CGMPrior* prior);
-  void dbarts_initializeCGMPriorFromOptions(dbarts::CGMPrior* prior, double base, double power);
+  void dbarts_initializeCGMPriorFromOptions(dbarts::CGMPrior* prior, double base, double power, const double* splitProbabilities);
   void dbarts_invalidateCGMPrior(dbarts::CGMPrior* prior);
   
   dbarts::NormalPrior* dbarts_createNormalPrior();

@@ -42,8 +42,8 @@ extern "C" {
   SEXP create(SEXP controlExpr, SEXP modelExpr, SEXP dataExpr)
   {
     Control control;
-    Model model;
     Data data;
+    Model model;
     
     SEXP classExpr = Rf_getAttrib(controlExpr, R_ClassSymbol);
     if (std::strcmp(CHAR(STRING_ELT(classExpr, 0)), "dbartsControl") != 0) Rf_error("'control' argument to dbarts_create not of class 'dbartsControl'");
@@ -56,8 +56,8 @@ extern "C" {
     
     
     initializeControlFromExpression(control, controlExpr);
-    initializeModelFromExpression(model, modelExpr, control);
     initializeDataFromExpression(data, dataExpr);
+    initializeModelFromExpression(model, modelExpr, control, data);
     
     BARTFit* fit = new BARTFit(control, model, data);
     
@@ -160,7 +160,8 @@ extern "C" {
     int* variableCountStorage = INTEGER(variableCountSamples);
     size_t length = bartResults->getNumVariableCountSamples();
     // these likely need to be down-sized from 64 to 32 bits
-    for (size_t i = 0; i < length; ++i) variableCountStorage[i] = static_cast<int>(bartResults->variableCountSamples[i]);
+    for (size_t i = 0; i < length; ++i)
+      variableCountStorage[i] = static_cast<int>(bartResults->variableCountSamples[i]);
     
     if (bartResults->kSamples != NULL) {
       SEXP kSamples = VECTOR_ELT(resultExpr, 4);
@@ -272,7 +273,7 @@ extern "C" {
     if (std::strcmp(CHAR(STRING_ELT(Rf_getAttrib(modelExpr, R_ClassSymbol), 0)), "dbartsModel") != 0) Rf_error("'model' argument to dbarts_setModel not of class 'dbartsModel'");
     
     Model model;
-    initializeModelFromExpression(model, modelExpr, fit->control);
+    initializeModelFromExpression(model, modelExpr, fit->control, fit->data);
     
     Model oldModel = fit->model;
     
@@ -890,11 +891,11 @@ extern "C" {
       int variable_i = static_cast<int>(flattenedTrees.variable[i]);
       variable[i] = variable_i >= 0 ? variable_i + 1 : variable_i;
       value[i] = flattenedTrees.value[i];
-#if defined(__MINGW32__) && __cplusplus < 201112L
-#  ifdef _WIN64
+#if __cplusplus < 201112L
+#  if defined(_WIN64) || SIZEOF_SIZE_T == 8
       std::sprintf(buffer, "%lu", static_cast<unsigned long>(i + 1));
 #  else
-      std::sprintf(buffer, "%u", i + 1);
+      std::sprintf(buffer, "%u", static_cast<unsigned int>(i + 1));
 #  endif
 #else
       std::sprintf(buffer, "%zu", i + 1);

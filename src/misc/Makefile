@@ -51,9 +51,9 @@ library : $(LOCAL_OBJECTS)
 	$(AR) $(ARFLAGS) ../misc.a $(LOCAL_OBJECTS)
 
 clean :
-	-rm -f config.h
-	-rm -f *.o
-	-rm -f *.a
+	@-rm -f config.h
+	@-rm -f *.o
+	@-rm -f *.a
 
 rebuild : clean all
 
@@ -70,7 +70,7 @@ $(INCLUDE_DIR)/misc/string.h : $(INCLUDE_DIR)/misc/stddef.h
 $(INCLUDE_DIR)/misc/thread.h : $(INCLUDE_DIR)/misc/stddef.h
 
 adaptiveRadixTree.o : adaptiveRadixTree.c $(INCLUDE_DIR)/misc/adaptiveRadixTree.h
-	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) -c adaptiveRadixTree.c -o adaptiveRadixTree.o
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SSE2_FLAG) -c adaptiveRadixTree.c -o adaptiveRadixTree.o
 
 binaryIO.o : binaryIO.c $(INCLUDE_DIR)/misc/binaryIO.h
 	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) -c binaryIO.c -o binaryIO.o

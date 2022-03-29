@@ -1,6 +1,6 @@
 Package: dbarts
-Version: 0.9-20
-Date: 2021-10-04
+Version: 0.9-22
+Date: 2022-03-26
 Title: Discrete Bayesian Additive Regression Trees Sampler
 Authors@R: c(
   person("Vincent", "Dorie", role = c("aut", "cre"), email = "vdorie@gmail.com", comment = c(ORCID = "0000-0002-9576-3064")),
@@ -23,14 +23,14 @@ Authors@R: c(
 Depends: R (>= 3.1-0)
 Imports: stats, methods, graphics, parallel
 Suggests: testthat (>= 0.9-0), knitr, rmarkdown
-VignetteBuilder: knitr
+VignetteBuilder: knitr, rmarkdown
 Description: Fits Bayesian additive regression trees (BART; Chipman, George, and McCulloch (2010) <doi:10.1214/09-AOAS285>) while allowing the updating of predictors or response so that BART can be incorporated as a conditional model in a Gibbs/Metropolis-Hastings sampler. Also serves as a drop-in replacement for package 'BayesTree'.
 License: GPL (>= 2)
 NeedsCompilation: yes
 Biarch: yes
 URL: https://github.com/vdorie/dbarts
 BugReports: https://github.com/vdorie/dbarts/issues
-Packaged: 2021-10-05 19:11:45 UTC; vdorie
+Packaged: 2022-03-27 16:32:22 UTC; vdorie
 Author: Vincent Dorie [aut, cre] (<https://orcid.org/0000-0002-9576-3064>),
   Hugh Chipman [aut],
   Robert McCulloch [aut],
@@ -53,4 +53,4 @@ Author: Vincent Dorie [aut, cre] (<https://orcid.org/0000-0002-9576-3064>),
   Daniel Richard G. [ctb] (ax_pthread.m4)
 Maintainer: Vincent Dorie <vdorie@gmail.com>
 Repository: CRAN
-Date/Publication: 2021-10-08 07:40:06 UTC
+Date/Publication: 2022-03-29 07:30:08 UTC

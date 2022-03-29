@@ -68,10 +68,80 @@ parsePriors <- function(control, data, tree.prior, node.prior, resid.prior, pare
   namedList(tree.prior, resid.prior, node.prior, node.hyperprior)
 }
 
-
-cgm <- function(power = 2, base = 0.95)
+num.vars <- numvars <- NULL # R CMD check
+cgm <- function(power = 2, base = 0.95, split.probs = 1 / num.vars)
 {
-  new("dbartsCGMPrior", power = power, base = base)
+  matchedCall <- match.call()
+  if (is.null(matchedCall$split.probs))
+    matchedCall$split.probs <- formals()$split.probs
+  split.probs.expr <- subTermInLanguage(matchedCall$split.probs, quote(num.vars), quote(ncol(data@x)))
+  split.probs.expr <- subTermInLanguage(split.probs.expr, quote(numvars), quote(ncol(data@x)))
+  split.probs <- eval(split.probs.expr, parent.frame())
+  data <- parent.frame()$data
+  
+  if (is.null(split.probs) || length(split.probs) == 1L) {
+    # if length 1, we can ignore it
+    split.probs <- numeric()
+  } else if (!is.null(names(split.probs))) {
+    default <- NA_real_
+    split.names <- names(split.probs)
+    defaultMatch <- split.names %in% ".default"
+    if (sum(defaultMatch) > 1L)
+      stop("cannot assign split probabilities: default specified multiple times")
+    if (sum(defaultMatch) == 1L) {
+      default <- split.probs[[which(defaultMatch)]]
+      split.probs <- split.probs[!defaultMatch]
+      split.names <- names(split.probs)
+    }
+    
+    result <- rep(default, ncol(data@x))
+    names(result) <- colnames(data@x)
+
+    if (is.null(names(result)) && length(split.names) > 0L)
+      stop("cannot assign split probabilities: model matrix has no column names")
+    
+    namesMatch <- match(split.names, names(result))
+    result[namesMatch[!is.na(namesMatch)]] <- split.probs[!is.na(namesMatch)]
+
+    split.probs <- split.probs[is.na(namesMatch)]
+    split.names <- names(split.probs)
+    
+    for (i in seq_along(split.probs)) {
+      if (split.names[i] %not_in% attr(data@x, "term.labels"))
+        stop("cannot assign split probabilities: unrecognized variable name '", split.names[i], "'")
+      factorMatch <- which(startsWith(names(result), paste0(split.names[i], ".")))
+      result[factorMatch] <- split.probs[i]
+    }
+
+    split.probs <- result
+
+  } else {
+    if (length(split.probs) != ncol(data@x))
+      stop("cannot assign split probabilities: length of input (", length(split.probs),
+           ") does not equal number of columns in model matrix (", ncol(data@x), ")")
+  }
+  
+  if (length(split.probs) > 0L) {
+    if (anyNA(split.probs)) {
+      if (!is.null(names(split.probs))) {
+        stop("cannot assign split probabilities: missing values for columns ",
+             paste0(paste0("'", names(split.probs)[is.na(split.probs)], "'"), collapse = ", "))
+      } else {
+        stop("cannot assign split probabilities: missing values for columns ",
+             paste0(which(is.na(split.probs)), collapse = ", "))
+      }
+    }
+    
+    split.probs <- split.probs / sum(split.probs)
+    if (all(split.probs == split.probs[1L]))
+      split.probs <- numeric()
+  }
+
+
+  new("dbartsCGMPrior",
+      power = power,
+      base = base,
+      splitProbabilities = split.probs)
 }
 
 normal <- function(k = 2.0)

@@ -30,7 +30,8 @@ bart(
     verbose = TRUE, nchain = 1, nthread = 1, combinechains = TRUE,
     keeptrees = FALSE, keepcall = TRUE, sampleronly = FALSE,
     seed = NA_integer_,
-    proposalprobs = NULL)
+    proposalprobs = NULL,
+    keepsampler = keeptrees)
 
 bart2(
     formula, data, test, subset, weights, offset, offset.test = offset,
@@ -39,7 +40,7 @@ bart2(
     power = 2.0, base = 0.95, split.probs = 1 / num.vars,
     n.trees = 75L,
     n.samples = 500L, n.burn = 500L,
-    n.chains = 4L, n.threads = min(guessNumCores(), n.chains),
+    n.chains = 4L, n.threads = min(dbarts::guessNumCores(), n.chains),
     combineChains = FALSE,
     n.cuts = 100L, useQuantiles = FALSE,
     n.thin = 1L, keepTrainingFits = TRUE,
@@ -48,6 +49,7 @@ bart2(
     keepCall = TRUE, samplerOnly = FALSE,
     seed = NA_integer_,
     proposal.probs = NULL,
+    keepSampler = keepTrees,
     \dots)
 
 \method{plot}{bart}(
@@ -56,7 +58,7 @@ bart2(
     \dots)
 
 \method{predict}{bart}(
-    object, newdata, offset,
+    object, newdata, offset, weights,
     type = c("ev", "ppd", "bart"),
     combineChains = TRUE, \dots)
 
@@ -162,6 +164,9 @@ extract(object, \dots)
    }
    \item{proposalprobs, proposal.probs}{
      Named numeric vector or \code{NULL}, optionally specifying the proposal rules and their probabilities. Elements should be \code{"birth_death"}, \code{"change"}, and \code{"swap"} to control tree change proposals, and \code{"birth"} to give the relative frequency of birth/death in the \code{"birth_death"} step. Defaults are 0.5, 0.1, 0.4, and 0.5 respectively.
+   }
+   \item{keepsampler, keepSampler}{
+     Logical that can be used to save the underlying \code{\link{dbartsSampler-class}} object even if \code{keepTrees} is false.
    }
    \item{formula}{
      The same as \code{x.train}, the name reflecting that a formula object can be used instead.
@@ -288,7 +293,7 @@ extract(object, \dots)
     The input dependent vector of values for the dependent variable. This is used in \code{plot.bart}.
   }
   \item{\code{fit}}{
-    Optional sampler object which stores the values of the tree splits. Required for using \code{predict} and only stored if \code{keeptrees} is \code{TRUE}.
+    Optional sampler object which stores the values of the tree splits. Required for using \code{predict} and only stored if \code{keeptrees} or \code{keepsampler} is \code{TRUE}.
   }
   \item{\code{n.chains}}{
     Information that can be lost if \code{combinechains} is \code{TRUE} is tracked here.
@@ -316,7 +321,7 @@ Chipman, H., George, E., and McCulloch R. (2006)
    Scholkopf, Platt and Hoffman, Eds., MIT Press, Cambridge, MA, 265-272.
 
 both of the above at:
-\url{http://www.rob-mcculloch.org}
+\url{https://www.rob-mcculloch.org}
 
 Friedman, J.H. (1991)
    Multivariate adaptive regression splines.

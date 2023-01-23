@@ -13,7 +13,7 @@ setMethod("initialize", "dbartsControl",
 dbartsControl <-
   function(verbose = FALSE, keepTrainingFits = TRUE, useQuantiles = FALSE, keepTrees = FALSE,
            n.samples = NA_integer_, n.cuts = 100L,
-           n.burn = 200L, n.trees = 75L, n.chains = 4L, n.threads = guessNumCores(),
+           n.burn = 200L, n.trees = 75L, n.chains = 4L, n.threads = dbarts::guessNumCores(),
            n.thin = 1L, printEvery = 100L, printCutoffs = 0L,
            rngKind = "default", rngNormalKind = "default", rngSeed = NA_integer_, updateState = TRUE)
 {
@@ -85,7 +85,7 @@ dbarts <- function(formula, data, test, subset, weights, offset, offset.test = o
                    verbose = FALSE, n.samples = 800L,
                    tree.prior = cgm, node.prior = normal, resid.prior = chisq,
                    proposal.probs = c(birth_death = 0.5, swap = 0.1, change = 0.4, birth = 0.5),
-                   control = dbartsControl(), sigma = NA_real_)
+                   control = dbarts::dbartsControl(), sigma = NA_real_)
 {
   matchedCall <- match.call()
   

@@ -1,9 +1,9 @@
 xbart <- function(formula, data, subset, weights, offset, verbose = FALSE, n.samples = 200L,
                   method = c("k-fold", "random subsample"), n.test = c(5, 0.2),
                   n.reps = 40L, n.burn = c(200L, 150L, 50L), loss = c("rmse", "log", "mcr"),
-                  n.threads = guessNumCores(),
+                  n.threads = dbarts::guessNumCores(),
                   n.trees = 75L, k = NULL, power = 2, base = 0.95, drop = TRUE,
-                  resid.prior = chisq, control = dbartsControl(), sigma = NA_real_,
+                  resid.prior = chisq, control = dbarts::dbartsControl(), sigma = NA_real_,
                   seed = NA_integer_)
 {
   matchedCall <- match.call()
@@ -47,11 +47,11 @@ xbart <- function(formula, data, subset, weights, offset, verbose = FALSE, n.sam
   if (is.null(matchedCall$loss)) {
     loss <- loss[if (!control@binary) 1L else 2L]
   } else if (is.function(loss)) {
-    if (length(formals(loss)) != 2L) stop("supplied loss function must take exactly two arguments")
+    if (length(formals(loss)) != 3L) stop("supplied loss function must take exactly three arguments")
     loss <- list(loss, evalEnv)
   } else if (is.list(loss)) {
     if (!is.function(loss[[1L]])) stop("first member of loss-list must be a function")
-    if (length(formals(loss[[1L]])) != 2L) stop("supplied loss function must take exactly two arguments")
+    if (length(formals(loss[[1L]])) != 3L) stop("supplied loss function must take exactly three arguments")
     if (!is.environment(loss[[2L]])) stop("second member of loss-list must be an environment")
   }
     

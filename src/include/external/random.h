@@ -50,11 +50,12 @@ ext_rng* ext_rng_createDefault(bool useNative);
 int ext_rng_createAndSeed(ext_rng** result, ext_rng_algorithm_t algorithm, ext_rng_standardNormal_t standardNormalAlgorithm);
 
 // returns what will be used in createDefault, unless useNative is specified;
-ext_rng_algorithm_t ext_rng_getDefaultAlgorithmType();
-ext_rng_standardNormal_t ext_rng_getDefaultStandardNormalType();
+ext_rng_algorithm_t ext_rng_getDefaultAlgorithmType(void);
+ext_rng_standardNormal_t ext_rng_getDefaultStandardNormalType(void);
 const char* ext_rng_getAlgorithmName(ext_rng_algorithm_t algorithm);
 
 bool ext_rng_seedsAreEqual(const ext_rng* rng1, const ext_rng* rng2);
+unsigned int ext_rng_getState0(const ext_rng* rng);
 
 // state can be null; for BOX_MULLER, it should point to a double that is the next number, or 0.0 if that isn't set yet
 // for USER_NORM, it should be a userFunction outlined below
@@ -78,6 +79,8 @@ double ext_rng_simulateLowerTruncatedStandardNormal(ext_rng* generator, double l
 // use the previous to generate truncated normals with sd 1 and nonzero mean
 double ext_rng_simulateLowerTruncatedNormalScale1(ext_rng* generator, double mean, double bound);
 double ext_rng_simulateUpperTruncatedNormalScale1(ext_rng* generator, double mean, double bound);
+double ext_rng_simulateLowerTruncatedNormal(ext_rng* generator, double mean, double sd, double bound);
+double ext_rng_simulateUpperTruncatedNormal(ext_rng* generator, double mean, double sd, double bound);
 
 // subsequent in random.c
 double ext_rng_simulateExponential(ext_rng* generator, double scale);

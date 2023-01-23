@@ -18,13 +18,17 @@ rbart_vi(
     power = 2.0, base = 0.95,
     n.trees = 75L,
     n.samples = 1500L, n.burn = 1500L,
-    n.chains = 4L, n.threads = min(guessNumCores(), n.chains), combineChains = FALSE,
+    n.chains = 4L, n.threads = min(dbarts::guessNumCores(), n.chains),
+    combineChains = FALSE,
     n.cuts = 100L, useQuantiles = FALSE,
     n.thin = 5L, keepTrainingFits = TRUE,
     printEvery = 100L, printCutoffs = 0L,
     verbose = TRUE,
     keepTrees = TRUE, keepCall = TRUE,
     seed = NA_integer_,
+    keepSampler = keepTrees,
+    keepTestFits = TRUE,
+    callback = NULL,
     \dots)
 
 \S3method{plot}{rbart}(
@@ -64,7 +68,13 @@ rbart_vi(
   \item{n.thin}{
     The number of tree jumps taken for every stored sample, but also the number of samples from the posterior of the standard deviation of the random effects before one is kept.
   }
-  \item{formula, data, test, subset, weights, offset, offset.test, sigest, sigdf, sigquant, k, power, base, n.trees, n.samples, n.burn, n.chains, n.threads, combineChains, n.cuts, useQuantiles, keepTrainingFits, printEvery, printCutoffs, verbose, keepTrees, keepCall, seed, \dots}{
+  \item{keepTestFits}{
+    Logical where, if false, test fits are obtained while running but not returned. Useful with \code{callback}.
+  }
+  \item{callback}{
+    Optional function of \code{trainFits}, \code{testFits}, \code{ranef}, \code{sigma}, and \code{tau}. Called after every post-burn-in iteration and the results of which are collected and stored in the final object.
+  }
+  \item{formula, data, test, subset, weights, offset, offset.test, sigest, sigdf, sigquant, k, power, base, n.trees, n.samples, n.burn, n.chains, n.threads, combineChains, n.cuts, useQuantiles, keepTrainingFits, printEvery, printCutoffs, verbose, keepTrees, keepCall, seed, keepSampler, \dots}{
     Same as in \code{\link{bart2}}.
   }
   \item{object}{
@@ -115,6 +125,9 @@ For binary outcomes the response model is changed to \eqn{P(Y_i = 1) = \Phi(f(x_
   }
   \item{\code{first.tau}}{
     Burn-in draws of \code{tau}.
+  }
+  \item{\code{callback}}{
+    Optional results of \code{callback} function.
   }
 }
 \author{

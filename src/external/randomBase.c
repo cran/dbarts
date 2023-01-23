@@ -360,7 +360,7 @@ bool ext_rng_seedsAreEqual(const ext_rng* rng1, const ext_rng* rng2){
   return memcmp(rng1->state, rng2->state, stateLength) == 0;
 }
 
-ext_rng_algorithm_t ext_rng_getDefaultAlgorithmType()
+ext_rng_algorithm_t ext_rng_getDefaultAlgorithmType(void)
 {
   SEXP seedsExpr = Rf_findVarInFrame(R_GlobalEnv, R_SeedsSymbol);
   if (seedsExpr == R_UnboundValue) {
@@ -378,7 +378,7 @@ ext_rng_algorithm_t ext_rng_getDefaultAlgorithmType()
   return (ext_rng_algorithm_t) (seed0 % 100);
 }
 
-ext_rng_standardNormal_t ext_rng_getDefaultStandardNormalType()
+ext_rng_standardNormal_t ext_rng_getDefaultStandardNormalType(void)
 {
   SEXP seedsExpr = Rf_findVarInFrame(R_GlobalEnv, R_SeedsSymbol);
   if (seedsExpr == R_UnboundValue) {
@@ -438,6 +438,39 @@ int ext_rng_setStandardNormalAlgorithm(ext_rng* generator, ext_rng_standardNorma
   return 0;
 }
 
+unsigned int ext_rng_getState0(const ext_rng* generator)
+{
+  if (generator == NULL) return (unsigned int) -1;
+  
+  switch (generator->algorithm) {
+    case EXT_RNG_ALGORITHM_WICHMANN_HILL:
+    case EXT_RNG_ALGORITHM_MARSAGLIA_MULTICARRY:
+    case EXT_RNG_ALGORITHM_SUPER_DUPER:
+    case EXT_RNG_ALGORITHM_LECUYER_CMRG:
+    return (unsigned int) *((uint_least32_t*) generator->state);
+    break;
+    case EXT_RNG_ALGORITHM_MERSENNE_TWISTER:
+    {
+      MersenneTwisterState* mt = (MersenneTwisterState*) generator->state;
+      
+      return (unsigned int) mt->state[0];
+    }
+    break;
+    case EXT_RNG_ALGORITHM_KNUTH_TAOCP:
+    case EXT_RNG_ALGORITHM_KNUTH_TAOCP2:
+    {
+      KnuthState* kt = (KnuthState*) generator->state;
+    
+      return (unsigned int) kt->state1[0];
+    }
+    break;
+    case EXT_RNG_ALGORITHM_USER_UNIFORM:
+    case EXT_RNG_ALGORITHM_INVALID:
+    default:
+    return (unsigned int) -1;
+    break;
+  }
+}
 
 #define LECUYER_M1 4294967087
 #define LECUYER_M2 4294944443

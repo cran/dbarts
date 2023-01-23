@@ -1,6 +1,7 @@
 #include "config.hpp"
 #include <dbarts/bartFit.hpp>
 
+#include <cfloat>    // DBL_EPSILON 
 #include <cmath>     // sqrt
 #include <cstring>   // memcpy
 #include <cstddef>   // size_t
@@ -25,10 +26,11 @@
 
 #include <misc/alloca.h>
 #include <misc/linearAlgebra.h>
+#include <misc/memalign.h>
 #include <misc/stats.h>
+#include <misc/simd.h>
 
 #include <external/io.h>
-#include <external/linearAlgebra.h>
 #include <external/random.h>
 #include <external/stats.h>
 
@@ -81,6 +83,12 @@ namespace {
 #else
   double subtractTimes(time_t end, time_t start);
 #endif
+
+  struct VectorFunctions {
+    void (*addVectorsInPlace)(const double* restrict x, misc_size_t length, double* restrict y);
+    void (*subtractVectorsInPlace)(const double* restrict x, misc_size_t length, double* restrict y);
+  };
+  unsigned int getVectorFunctionsAndAlignment(const BARTFit& fit, size_t chainNum, VectorFunctions& vec);
 }
 
 namespace dbarts {
@@ -88,15 +96,16 @@ namespace dbarts {
   
   void BARTFit::rebuildScratchFromState()
   {
+    VectorFunctions vec;
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
       
       misc_setVectorToConstant(chainScratch[chainNum].totalFits, data.numObservations, 0.0);
-      
-      for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum)
-        misc_addVectorsInPlace(const_cast<const double*>(state[chainNum].treeFits + treeNum * data.numObservations),
-                               data.numObservations, 1.0,
-                               chainScratch[chainNum].totalFits);
-      
+      getVectorFunctionsAndAlignment(*this, chainNum, vec);
+
+      for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
+        const double* treeFits = state[chainNum].treeFits + treeNum * state[chainNum].treeFitsStride;
+        vec.addVectorsInPlace(treeFits, data.numObservations, chainScratch[chainNum].totalFits);
+      }
       
       if (data.numTestObservations > 0) {
         double* testFits = new double[data.numTestObservations];
@@ -104,14 +113,14 @@ namespace dbarts {
         misc_setVectorToConstant(chainScratch[chainNum].totalTestFits, data.numTestObservations, 0.0);
         
         for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
-          double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
+          double* treeFits = state[chainNum].treeFits + treeNum * state[chainNum].treeFitsStride;
         
           // next allocates memory
           double* nodeParams = state[chainNum].trees[treeNum].recoverParametersFromFits(*this, treeFits);
           
           state[chainNum].trees[treeNum].setCurrentFitsFromParameters(*this, nodeParams, treeFits, testFits);
           
-          misc_addVectorsInPlace(const_cast<const double*>(testFits), data.numTestObservations, 1.0, chainScratch[chainNum].totalTestFits);
+          misc_addVectorsInPlace(const_cast<const double*>(testFits), data.numTestObservations, chainScratch[chainNum].totalTestFits);
           
           delete [] nodeParams;
         }
@@ -178,20 +187,25 @@ namespace dbarts {
           // offset update is in-place, don't have access to old value so recreate
           std::memcpy(yRescaled, data.y, data.numObservations * sizeof(double));
       
-          misc_addVectorsInPlace(data.offset, data.numObservations, -1.0, yRescaled);
+          misc_subtractVectorsInPlace(data.offset, data.numObservations, yRescaled);
       
-          misc_addScalarToVectorInPlace(   yRescaled, data.numObservations, -sharedScratch.dataScale.min);
+          // Y' = (y - min) / (max - min) - 0.5
+          //    = y / (max - min) - min / (max - min) - 0.5 * (max - min) / (max - min)
+          //    = y / (max - min) - 0.5 (max + min) / (max - min)
+          /* misc_addScalarToVectorInPlace(   yRescaled, data.numObservations, -sharedScratch.dataScale.min);
           misc_scalarMultiplyVectorInPlace(yRescaled, data.numObservations, 1.0 / sharedScratch.dataScale.range);
-          misc_addScalarToVectorInPlace(   yRescaled, data.numObservations, -0.5);
+          misc_addScalarToVectorInPlace(   yRescaled, data.numObservations, -0.5); */
+          misc_scalarMultiplyVectorInPlace(yRescaled, data.numObservations, 1.0 / sharedScratch.dataScale.range);
+          misc_addScalarToVectorInPlace(   yRescaled, data.numObservations, -0.5 * (sharedScratch.dataScale.max + sharedScratch.dataScale.min) / sharedScratch.dataScale.range);
         } else {
           // subtract old offset and add new one
           if (data.offset != NULL)
-            misc_addVectorsInPlace(data.offset, data.numObservations, 1.0 / sharedScratch.dataScale.range, yRescaled);
+            misc_addVectorsInPlaceWithMultiplier(data.offset, data.numObservations, 1.0 / sharedScratch.dataScale.range, yRescaled);
           
           data.offset = newOffset;
           
           if (data.offset != NULL)
-            misc_addVectorsInPlace(data.offset, data.numObservations, -1.0 / sharedScratch.dataScale.range, yRescaled);
+            misc_addVectorsInPlaceWithMultiplier(data.offset, data.numObservations, -1.0 / sharedScratch.dataScale.range, yRescaled);
         }
       }
     }
@@ -237,7 +251,7 @@ namespace dbarts {
             
             state[chainNum].savedTrees[treeOffset].getPredictions(*this, xt_test, numTestObservations, currTestFits);
             
-            misc_addVectorsInPlace(const_cast<const double*>(currTestFits), numTestObservations, 1.0, totalTestFits);
+            misc_addVectorsInPlace(const_cast<const double*>(currTestFits), numTestObservations, totalTestFits);
           }
           
           double* result_i = result + (sampleNum + chainNum * currentNumSamples) * numTestObservations;
@@ -245,10 +259,10 @@ namespace dbarts {
             std::memcpy(result_i, const_cast<const double*>(totalTestFits), numTestObservations * sizeof(double));
           } else {
             misc_setVectorToConstant(result_i, numTestObservations, sharedScratch.dataScale.range * 0.5 + sharedScratch.dataScale.min);
-            misc_addVectorsInPlace(const_cast<const double*>(totalTestFits), numTestObservations, sharedScratch.dataScale.range, result_i);
+            misc_addVectorsInPlaceWithMultiplier(const_cast<const double*>(totalTestFits), numTestObservations, sharedScratch.dataScale.range, result_i);
           }
           
-          if (testOffset != NULL) misc_addVectorsInPlace(testOffset, numTestObservations, 1.0, result_i);
+          if (testOffset != NULL) misc_addVectorsInPlace(testOffset, numTestObservations, result_i);
         }
       }
       delete [] xt_test;
@@ -261,12 +275,12 @@ namespace dbarts {
         misc_setVectorToConstant(totalTestFits, numTestObservations, 0.0);
         
         for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
-          const double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
+          const double* treeFits = state[chainNum].treeFits + treeNum * state[chainNum].treeFitsStride;
           const double* nodeParams = state[chainNum].trees[treeNum].recoverParametersFromFits(*this, treeFits);
           
           state[chainNum].trees[treeNum].setCurrentFitsFromParameters(*this, nodeParams, xt_test, numTestObservations, currTestFits);
           
-          misc_addVectorsInPlace(const_cast<const double*>(currTestFits), numTestObservations, 1.0, totalTestFits);
+          misc_addVectorsInPlace(const_cast<const double*>(currTestFits), numTestObservations, totalTestFits);
           
           delete [] nodeParams;
         }
@@ -276,10 +290,10 @@ namespace dbarts {
           std::memcpy(result_i, const_cast<const double*>(totalTestFits), numTestObservations * sizeof(double));
         } else {
           misc_setVectorToConstant(result_i, numTestObservations, sharedScratch.dataScale.range * 0.5 + sharedScratch.dataScale.min);
-          misc_addVectorsInPlace(const_cast<const double*>(totalTestFits), numTestObservations, sharedScratch.dataScale.range, result_i);
+          misc_addVectorsInPlaceWithMultiplier(const_cast<const double*>(totalTestFits), numTestObservations, sharedScratch.dataScale.range, result_i);
         }
         
-        if (testOffset != NULL) misc_addVectorsInPlace(testOffset, numTestObservations, 1.0, result_i);
+        if (testOffset != NULL) misc_addVectorsInPlace(testOffset, numTestObservations, result_i);
       }
       delete [] xt_test;
     }
@@ -300,7 +314,7 @@ namespace {
       misc_setVectorToConstant(chainScratch[chainNum].totalFits, data.numObservations, 0.0);
       
       for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
-        double* treeFits = const_cast<double*>(state[chainNum].treeFits + treeNum * data.numObservations);
+        double* treeFits = const_cast<double*>(state[chainNum].treeFits + treeNum * state[chainNum].treeFitsStride);
         
         // duplicate old node parameters
         double* nodeParams = state[chainNum].trees[treeNum].recoverParametersFromFits(fit, treeFits);
@@ -312,7 +326,7 @@ namespace {
           updateVariablesAvailable(fit, state[chainNum].trees[treeNum].top, j);
                 
         state[chainNum].trees[treeNum].setCurrentFitsFromParameters(fit, nodeParams, treeFits, NULL);
-        misc_addVectorsInPlace(treeFits, data.numObservations, 1.0, chainScratch[chainNum].totalFits);
+        misc_addVectorsInPlace(treeFits, data.numObservations, chainScratch[chainNum].totalFits);
         
         delete [] nodeParams;
       }
@@ -335,7 +349,7 @@ namespace {
     for (size_t chainNum = 0; chainNum < control.numChains && allTreesAreValid; ++chainNum) {
       
       for (size_t treeNum = 0; treeNum < control.numTrees && allTreesAreValid; ++treeNum) {
-        const double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
+        const double* treeFits = state[chainNum].treeFits + treeNum * state[chainNum].treeFitsStride;
         
         // next allocates memory
         treeParams[treeNum + chainNum * control.numTrees] = 
@@ -352,16 +366,16 @@ namespace {
     // go back across bottoms and set predictions to those mus for obs now in node
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
       for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
-        double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
+        double* treeFits = state[chainNum].treeFits + treeNum * state[chainNum].treeFitsStride;
         const double* nodeParams = treeParams[treeNum + chainNum * control.numTrees];
         
-        misc_addVectorsInPlace(treeFits, data.numObservations, -1.0, chainScratch[chainNum].totalFits);
+        misc_subtractVectorsInPlace(treeFits, data.numObservations, chainScratch[chainNum].totalFits);
         
         state[chainNum].trees[treeNum].setCurrentFitsFromParameters(fit, nodeParams, treeFits, NULL);
         for (int32_t j = 0; j < static_cast<int32_t>(data.numPredictors); ++j)
           updateVariablesAvailable(fit, state[chainNum].trees[treeNum].top, j);
         
-        misc_addVectorsInPlace(treeFits, data.numObservations, 1.0, chainScratch[chainNum].totalFits);
+        misc_addVectorsInPlace(treeFits, data.numObservations, chainScratch[chainNum].totalFits);
       }
     }
         
@@ -574,13 +588,13 @@ namespace {
       misc_setVectorToConstant(chainScratch[chainNum].totalTestFits, data.numTestObservations, 0.0);
       
       for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
-        const double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
+        const double* treeFits = state[chainNum].treeFits + treeNum * state[chainNum].treeFitsStride;
    
         const double* nodeParams = state[chainNum].trees[treeNum].recoverParametersFromFits(fit, treeFits);
       
         state[chainNum].trees[treeNum].setCurrentFitsFromParameters(fit, nodeParams, NULL, currTestFits);
       
-        misc_addVectorsInPlace(currTestFits, data.numTestObservations, 1.0, chainScratch[chainNum].totalTestFits);
+        misc_addVectorsInPlace(currTestFits, data.numTestObservations, chainScratch[chainNum].totalTestFits);
       
         delete [] nodeParams;
       }
@@ -693,6 +707,8 @@ namespace dbarts {
     
     size_t** oldTreeIndices      = misc_stackAllocate(control.numChains, size_t*);
     double** oldTreeFits         = misc_stackAllocate(control.numChains, double*);
+    size_t* oldTreeFitsStrides          = misc_stackAllocate(control.numChains, size_t);
+    unsigned int* oldTreeFitsAlignments = misc_stackAllocate(control.numChains, unsigned int);
     
     double** currTestFits = misc_stackAllocate(control.numChains, double*);
     
@@ -701,14 +717,35 @@ namespace dbarts {
       oldTreeIndices[chainNum]      = state[chainNum].treeIndices;
       oldTreeFits[chainNum]         = state[chainNum].treeFits;
       
+      oldTreeFitsStrides[chainNum] = state[chainNum].treeFitsStride;
+      
       currTestFits[chainNum] = NULL;
       
       if (oldNumObservations != data.numObservations) {
-        delete [] chainScratch[chainNum].totalFits;
-        delete [] chainScratch[chainNum].treeY;
-      
-        chainScratch[chainNum].treeY     = new double[data.numObservations];
-        chainScratch[chainNum].totalFits = new double[data.numObservations];
+        if (chainScratch[chainNum].alignment != 0) {
+          misc_alignedFree(chainScratch[chainNum].totalFits);
+          misc_alignedFree(chainScratch[chainNum].treeY);
+        } else {
+          delete [] chainScratch[chainNum].totalFits;
+          delete [] chainScratch[chainNum].treeY;
+        }
+        
+        chainScratch[chainNum].alignment = misc_simd_alignment;
+        if (chainScratch[chainNum].alignment != 0) {
+          if (misc_alignedAllocate(
+                reinterpret_cast<void**>(&chainScratch[chainNum].treeY),
+                chainScratch[chainNum].alignment,
+                data.numObservations * sizeof(double)) != 0)
+            ext_throwError("error allocating treeY aligned");
+          if (misc_alignedAllocate(
+                reinterpret_cast<void**>(&chainScratch[chainNum].totalFits),
+                chainScratch[chainNum].alignment,
+                data.numObservations * sizeof(double)) != 0)
+            ext_throwError("error allocating totalFits aligned");
+        } else {
+          chainScratch[chainNum].treeY = new double[data.numObservations];
+          chainScratch[chainNum].totalFits = new double[data.numObservations];
+        }
         
         if (control.responseIsBinary) {
           delete [] chainScratch[chainNum].probitLatents;
@@ -716,7 +753,23 @@ namespace dbarts {
         }
         
         state[chainNum].treeIndices = new size_t[data.numObservations * control.numTrees];
-        state[chainNum].treeFits    = new double[data.numObservations * control.numTrees];
+        
+        oldTreeFitsAlignments[chainNum] = state[chainNum].treeFitsAlignment;
+        
+        state[chainNum].treeFitsAlignment = misc_simd_alignment;
+        if (state[chainNum].treeFitsAlignment == 0) {
+          state[chainNum].treeFitsStride = data.numObservations;
+          state[chainNum].treeFits = new double[state[chainNum].treeFitsStride * control.numTrees];
+        } else {
+          size_t remainder = data.numObservations % (state[chainNum].treeFitsAlignment / sizeof(double));
+          state[chainNum].treeFitsStride = data.numObservations + 
+            (remainder == 0 ? 0 : (state[chainNum].treeFitsAlignment / sizeof(double) - remainder));
+          if (misc_alignedAllocate(
+                reinterpret_cast<void**>(&state[chainNum].treeFits),
+                state[chainNum].treeFitsAlignment,
+                control.numTrees * state[chainNum].treeFitsStride * sizeof(double)) != 0)
+            ext_throwError("error allocating aligned vector");
+        }
       }
     }
     
@@ -790,7 +843,7 @@ namespace dbarts {
     // now update the trees, which is a bit messy
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
       for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
-        const double* oldTreeFits_i = oldTreeFits[chainNum] + treeNum * oldNumObservations;
+        const double* oldTreeFits_i = oldTreeFits[chainNum] + treeNum * oldTreeFitsStrides[chainNum];
         
         // Use the bottom node enumeration to determine which fits to use.
         // The bottom nodes themselves keep an enumeration number, so that when prunned
@@ -813,12 +866,12 @@ namespace dbarts {
         for (int32_t i = 0; i < static_cast<int32_t>(data.numPredictors); ++i)
           updateVariablesAvailable(*this, state[chainNum].trees[treeNum].top, i);
         
-        double* currTreeFits = state[chainNum].treeFits + treeNum * data.numObservations;
+        double* currTreeFits = state[chainNum].treeFits + treeNum * state[chainNum].treeFitsStride;
         state[chainNum].trees[treeNum].setCurrentFitsFromParameters(*this, nodeParams, currTreeFits, currTestFits[chainNum]);
-        misc_addVectorsInPlace(currTreeFits, data.numObservations, 1.0, chainScratch[chainNum].totalFits);
+        misc_addVectorsInPlace(currTreeFits, data.numObservations, chainScratch[chainNum].totalFits);
         
         if (data.numTestObservations > 0)
-          misc_addVectorsInPlace(currTestFits[chainNum], data.numTestObservations, 1.0, chainScratch[chainNum].totalTestFits);
+          misc_addVectorsInPlace(currTestFits[chainNum], data.numTestObservations, chainScratch[chainNum].totalTestFits);
         
         delete [] nodeParams;
       }
@@ -832,12 +885,19 @@ namespace dbarts {
     
     if (oldNumObservations != data.numObservations) {
       for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
-        delete [] oldTreeFits[chainNum];
+        if (oldTreeFitsAlignments[chainNum] == 0) {
+          delete [] oldTreeFits[chainNum];
+        } else {
+          misc_alignedFree(oldTreeFits[chainNum]);
+        }
         delete [] oldTreeIndices[chainNum];
       }
     }
     
     misc_stackFree(currTestFits);
+    
+    misc_stackFree(oldTreeFitsAlignments);
+    misc_stackFree(oldTreeFitsStrides);
     
     misc_stackFree(oldTreeFits);
     misc_stackFree(oldTreeIndices);
@@ -845,13 +905,15 @@ namespace dbarts {
   
   void BARTFit::setControl(const Control& newControl)
   {
+    Control oldControl = control;
+    
     bool stateResized = false;
-    if (control.numChains == newControl.numChains) {
-      for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum)
+    if (oldControl.numChains == newControl.numChains) {
+      for (size_t chainNum = 0; chainNum < oldControl.numChains; ++chainNum)
         stateResized |= state[chainNum].resize(*this, newControl);
     } else {
     
-      size_t resizeEnd = std::min(control.numChains, newControl.numChains);
+      size_t resizeEnd = std::min(oldControl.numChains, newControl.numChains);
       
       State* oldState = state;
       state = static_cast<State*>(::operator new (newControl.numChains * sizeof(State)));
@@ -866,26 +928,26 @@ namespace dbarts {
         stateResized = true;
       }
       
-      for (size_t chainNum = control.numChains; chainNum > resizeEnd; --chainNum)
-        oldState[chainNum - 1].invalidate(control.numTrees, currentNumSamples);
+      for (size_t chainNum = oldControl.numChains; chainNum > resizeEnd; --chainNum)
+        oldState[chainNum - 1].invalidate(oldControl.numTrees, currentNumSamples);
       
       ::operator delete (oldState);
     }
     
-    if (control.numTrees != newControl.numTrees) {
+    if (oldControl.numTrees != newControl.numTrees) {
       NormalPrior& nodePrior(*static_cast<NormalPrior*>(model.muPrior));
       nodePrior.setScale(model.nodeScale / std::sqrt(static_cast<double>(newControl.numTrees)));
     }
     
-    rng_algorithm_t old_rng_algorithm = control.rng_algorithm;
-    rng_standardNormal_t old_rng_standardNormal = control.rng_standardNormal;
+    rng_algorithm_t old_rng_algorithm = oldControl.rng_algorithm;
+    rng_standardNormal_t old_rng_standardNormal = oldControl.rng_standardNormal;
     
-    if (old_rng_algorithm != control.rng_algorithm || old_rng_standardNormal != control.rng_standardNormal)
+    if (old_rng_algorithm != oldControl.rng_algorithm || old_rng_standardNormal != oldControl.rng_standardNormal)
       destroyRNG(*this);
     
     control = newControl;
-    
-    if (old_rng_algorithm != control.rng_algorithm || old_rng_standardNormal != control.rng_standardNormal)
+    // looks redundant, but the assignment taking place between impacts the destroy/create
+    if (old_rng_algorithm != oldControl.rng_algorithm || old_rng_standardNormal != oldControl.rng_standardNormal)
       createRNG(*this);
     
     if (stateResized) {
@@ -918,7 +980,7 @@ namespace dbarts {
         for (size_t k = 0; k < numTreeIndices; ++k) {
           size_t treeNum = treeIndices[k];
           
-          const double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
+          const double* treeFits = state[chainNum].treeFits + treeNum * state[chainNum].treeFitsStride;
           double* nodeParams = state[chainNum].trees[treeNum].recoverParametersFromFits(*this, treeFits);
           
           NodeVector bottomNodes(const_cast<Tree*>(&state[chainNum].trees[treeNum])->top.getBottomVector());
@@ -1069,7 +1131,7 @@ namespace dbarts {
           size_t treeNum = treeIndices[k];
           
           // get nodes to store averages
-          const double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
+          const double* treeFits = state[chainNum].treeFits + treeNum * state[chainNum].treeFitsStride;
           double* nodeParams = state[chainNum].trees[treeNum].recoverParametersFromFits(*this, treeFits);
           
           NodeVector bottomNodes(const_cast<Tree*>(&state[chainNum].trees[treeNum])->top.getBottomVector());
@@ -1149,9 +1211,16 @@ namespace dbarts {
     delete [] sharedScratch.xt_test; sharedScratch.xt_test = NULL;
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
       delete [] chainScratch[chainNum].totalTestFits; chainScratch[chainNum].totalTestFits = NULL;
-      delete [] chainScratch[chainNum].totalFits; chainScratch[chainNum].totalFits = NULL;
       delete [] chainScratch[chainNum].probitLatents; chainScratch[chainNum].probitLatents = NULL;
-      delete [] chainScratch[chainNum].treeY; chainScratch[chainNum].treeY = NULL;
+      if (chainScratch[chainNum].alignment != 0) {
+        misc_alignedFree(chainScratch[chainNum].totalFits);
+        misc_alignedFree(chainScratch[chainNum].treeY);
+      } else {
+        delete [] chainScratch[chainNum].totalFits;
+        delete [] chainScratch[chainNum].treeY;
+      }
+      chainScratch[chainNum].totalFits = NULL;
+      chainScratch[chainNum].treeY = NULL;
     }
     
     delete [] chainScratch;
@@ -1231,13 +1300,13 @@ namespace dbarts {
         misc_setVectorToConstant(chainScratch[chainNum].totalTestFits, data.numTestObservations, 0.0);
       
       for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
-        double* treeFits = state[chainNum].treeFits + treeNum * data.numObservations;
+        double* treeFits = state[chainNum].treeFits + treeNum * state[chainNum].treeFitsStride;
         
         state[chainNum].trees[treeNum].sampleParametersFromPrior(*this, chainNum, treeFits, testFits);
         
-        misc_addVectorsInPlace(treeFits, data.numObservations, 1.0, chainScratch[chainNum].totalFits);
+        misc_addVectorsInPlace(treeFits, data.numObservations, chainScratch[chainNum].totalFits);
         if (data.numTestObservations > 0)
-          misc_addVectorsInPlace(const_cast<const double*>(testFits), data.numTestObservations, 1.0, chainScratch[chainNum].totalTestFits);
+          misc_addVectorsInPlace(const_cast<const double*>(testFits), data.numTestObservations, chainScratch[chainNum].totalTestFits);
       }
     }
     
@@ -1275,8 +1344,17 @@ extern "C" {
     StepType ignored;
     
     size_t numSamples = results.numSamples;
+
+    VectorFunctions vec;
+    unsigned int alignment = getVectorFunctionsAndAlignment(fit, chainNum, vec);
     
-    double* currFits = new double[data.numObservations];
+    double* currFits;
+    if (alignment != 0) {
+      misc_alignedAllocate(reinterpret_cast<void**>(&currFits), alignment, data.numObservations * sizeof(double));
+    } else {
+      currFits = new double[data.numObservations];
+    }
+    
     double* currTestFits = data.numTestObservations > 0 ? new double[data.numTestObservations] : NULL;
     
     uint32_t* variableCounts = misc_stackAllocate(data.numPredictors, uint32_t);
@@ -1292,12 +1370,12 @@ extern "C" {
       y = new double[data.numObservations];
       std::memcpy(y, const_cast<const double*>(chainScratch.probitLatents), data.numObservations * sizeof(double));
       if (data.offset != NULL)
-        ext_addVectorsInPlace(data.offset, data.numObservations, -1.0, y);
+        misc_subtractVectorsInPlace(data.offset, data.numObservations, y);
     } else {
       // const cast b/c yRescaled doesn't change, but probit version does
       y = const_cast<double*>(sharedScratch.yRescaled);
     }
-    
+
     for (size_t k = 0; k < totalNumIterations; ++k) {
       if (control.numThreads > 1 && control.numChains > 1)
         misc_htm_reserveThreadsForSubTask(fit.threadManager, taskId, k);
@@ -1319,13 +1397,13 @@ extern "C" {
         misc_setVectorToConstant(chainScratch.totalTestFits, data.numTestObservations, 0.0);
       
       for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum) {
-        double* oldTreeFits = state.treeFits + treeNum * data.numObservations;
+        double* oldTreeFits = state.treeFits + treeNum * state.treeFitsStride;
         
         // treeY = y - (totalFits - oldTreeFits)
         // is residual from every *other* tree, so what is left for this tree to do
         std::memcpy(chainScratch.treeY, y, data.numObservations * sizeof(double));
-        misc_addVectorsInPlace(const_cast<const double*>(chainScratch.totalFits), data.numObservations, -1.0, chainScratch.treeY);
-        misc_addVectorsInPlace(const_cast<const double*>(oldTreeFits), data.numObservations, 1.0, chainScratch.treeY);
+        vec.subtractVectorsInPlace(const_cast<const double*>(chainScratch.totalFits), data.numObservations, chainScratch.treeY);
+        vec.addVectorsInPlace(const_cast<const double*>(oldTreeFits), data.numObservations, chainScratch.treeY);
         
         state.trees[treeNum].setNodeAverages(fit, chainNum, chainScratch.treeY);
         
@@ -1333,11 +1411,11 @@ extern "C" {
         state.trees[treeNum].sampleParametersAndSetFits(fit, chainNum, currFits, isThinningIteration ? NULL : currTestFits);
         
         // totalFits += currFits - treeFits
-        misc_addVectorsInPlace(const_cast<const double*>(oldTreeFits), data.numObservations, -1.0, chainScratch.totalFits);
-        misc_addVectorsInPlace(const_cast<const double*>(currFits), data.numObservations, 1.0, chainScratch.totalFits);
+        vec.subtractVectorsInPlace(const_cast<const double*>(oldTreeFits), data.numObservations, chainScratch.totalFits);
+        vec.addVectorsInPlace(const_cast<const double*>(currFits), data.numObservations, chainScratch.totalFits);
         
         if (!isThinningIteration && data.numTestObservations > 0)
-          misc_addVectorsInPlace(const_cast<const double*>(currTestFits), data.numTestObservations, 1.0, chainScratch.totalTestFits);
+          misc_addVectorsInPlace(const_cast<const double*>(currTestFits), data.numTestObservations, chainScratch.totalTestFits);
         
         std::memcpy(oldTreeFits, const_cast<const double*>(currFits), data.numObservations * sizeof(double));
       }
@@ -1346,14 +1424,14 @@ extern "C" {
         size_t treeSampleNum = (fit.currentSampleNum + resultSampleNum) % fit.currentNumSamples;
         
         for (size_t treeNum = 0; treeNum < control.numTrees; ++treeNum)
-          state.savedTrees[treeNum + treeSampleNum * control.numTrees].copyStructureFrom(fit, state.trees[treeNum], const_cast<const double*>(state.treeFits + treeNum * data.numObservations));
+          state.savedTrees[treeNum + treeSampleNum * control.numTrees].copyStructureFrom(fit, state.trees[treeNum], const_cast<const double*>(state.treeFits + treeNum * state.treeFitsStride));
       }
       
       if (control.responseIsBinary) { 
         sampleProbitLatentVariables(fit, state, chainScratch.totalFits, chainScratch.probitLatents);
         std::memcpy(y, const_cast<const double*>(chainScratch.probitLatents), data.numObservations * sizeof(double));
         if (data.offset != NULL)
-          ext_addVectorsInPlace(data.offset, data.numObservations, -1.0, y);
+          misc_subtractVectorsInPlace(data.offset, data.numObservations, y);
       }
       
       if (!model.sigmaSqPrior->isFixed)
@@ -1383,7 +1461,11 @@ extern "C" {
     
     if (control.responseIsBinary) delete [] y;
     
-    delete [] currFits;
+    if (alignment != 0) {
+      misc_alignedFree(currFits);
+    } else {
+      delete [] currFits;
+    }
     if (data.numTestObservations > 0) delete [] currTestFits;
     misc_stackFree(variableCounts);
   }
@@ -1541,6 +1623,22 @@ namespace dbarts {
 namespace {
   using namespace dbarts;
   
+  unsigned int getVectorFunctionsAndAlignment(const BARTFit& fit, size_t chainNum, VectorFunctions& vec) {
+    unsigned int alignment = 0;
+    if (fit.chainScratch[chainNum].alignment == fit.state[chainNum].treeFitsAlignment &&
+        fit.chainScratch[chainNum].alignment == misc_simd_alignment &&
+        misc_simd_alignment!= 0)
+    {
+      alignment = misc_simd_alignment;
+      vec.addVectorsInPlace = misc_addAlignedVectorsInPlace;
+      vec.subtractVectorsInPlace = misc_subtractAlignedVectorsInPlace;
+    } else {
+      vec.addVectorsInPlace = misc_addVectorsInPlace;
+      vec.subtractVectorsInPlace = misc_subtractVectorsInPlace;
+    }
+    return alignment;
+  }
+  
   void printTerminalSummary(const BARTFit& fit) {
     ext_printf("total seconds in loop: %f\n", fit.runningTime);
     
@@ -1595,12 +1693,28 @@ namespace {
     
     // chain scratches
     for (size_t chainNum = 0; chainNum < control.numChains; ++chainNum) {
-      chainScratch[chainNum].treeY = new double[data.numObservations];
+      chainScratch[chainNum].alignment = misc_simd_alignment;
+      if (chainScratch[chainNum].alignment != 0) {
+        if (misc_alignedAllocate(
+              reinterpret_cast<void**>(&chainScratch[chainNum].treeY),
+              chainScratch[chainNum].alignment,
+              data.numObservations * sizeof(double)) != 0)
+          ext_throwError("error allocating treeY aligned");
+        if (misc_alignedAllocate(
+            reinterpret_cast<void**>(&chainScratch[chainNum].totalFits),
+            chainScratch[chainNum].alignment,
+            data.numObservations * sizeof(double)) != 0)
+          ext_throwError("error allocating totalFits aligned");
+      } else {
+        chainScratch[chainNum].treeY = new double[data.numObservations];
+        chainScratch[chainNum].totalFits = new double[data.numObservations];
+      }
       double* y = control.responseIsBinary ? chainScratch[chainNum].probitLatents : const_cast<double*>(sharedScratch.yRescaled);
       
-      for (size_t i = 0; i < data.numObservations; ++i) chainScratch[chainNum].treeY[i] = y[i];
+      std::memcpy(chainScratch[chainNum].treeY, const_cast<const double*>(y), data.numObservations * sizeof(double));
+      // for (size_t i = 0; i < data.numObservations; ++i) chainScratch[chainNum].treeY[i] = y[i];
       
-      chainScratch[chainNum].totalFits = new double[data.numObservations];
+      
       chainScratch[chainNum].totalTestFits = data.numTestObservations > 0 ? new double[data.numTestObservations] : NULL;
       
       chainScratch[chainNum].taskId = static_cast<size_t>(-1);
@@ -2027,13 +2141,13 @@ namespace {
     // z = 2.0 * y - 1.0 - offset; so -1 if y == 0 and 1 if y == 1 when offset == 0
 #ifndef MATCH_BAYES_TREE
     misc_setVectorToConstant(z, data.numObservations, -1.0);
-    // if (data.offset != NULL) misc_addVectorsInPlace(data.offset, data.numObservations, -1.0, z);
-    misc_addVectorsInPlace(data.y, data.numObservations, 2.0, z);
+    // if (data.offset != NULL) misc_subtractVectorsInPlace(data.offset, data.numObservations, z);
+    misc_addVectorsInPlaceWithMultiplier(data.y, data.numObservations, 2.0, z);
 #else
     // BayesTree initialized the latents to be -2 and 0; was probably a bug
     misc_setVectorToConstant(z, data.numObservations, -2.0);
-    if (data.offset != NULL) misc_addVectorsInPlace(data.offset, data.numObservations, -1.0, z);
-    misc_addVectorsInPlace(data.y, data.numObservations, 2.0, z);
+    if (data.offset != NULL) misc_subtractVectorsInPlace(data.offset, data.numObservations, z);
+    misc_addVectorsInPlaceWithMultiplier(data.y, data.numObservations, 2.0, z);
 #endif
   }
   
@@ -2044,7 +2158,7 @@ namespace {
     double* yRescaled = const_cast<double*>(fit.sharedScratch.yRescaled);
     
     if (data.offset != NULL) {
-      misc_addVectors(data.offset, data.numObservations, -1.0, data.y, yRescaled);
+      misc_subtractVectors(data.offset, data.numObservations, data.y, yRescaled);
     } else {
       std::memcpy(yRescaled, data.y, data.numObservations * sizeof(double));
     }
@@ -2073,11 +2187,21 @@ namespace {
       double offset = 0.0;
       if (fit.data.offset != NULL) offset = fit.data.offset[i];
       
-      // Samples a truncated normal with mean (mean + offset) and lower bound of 0
-      if (fit.data.y[i] > 0.0) {
-        z[i] = ext_rng_simulateLowerTruncatedNormalScale1(state.rng, mean + offset, 0.0);
+      double z_new, sign;
+      sign = 2.0 * fit.data.y[i] - 1.0;
+      if (fit.data.weights == NULL) {
+        // Y_i ~ N(mu+offset, sigma^2)+;
+        z_new = sign * ext_rng_simulateLowerTruncatedNormalScale1(state.rng, sign * (mean + offset), 0.0);
       } else {
-        z[i] = ext_rng_simulateUpperTruncatedNormalScale1(state.rng, mean + offset, 0.0);
+        z_new = sign * ext_rng_simulateLowerTruncatedNormal(state.rng, sign * (mean + offset), 1.0 / std::sqrt(fit.data.weights[i]), 0.0);
+      }
+      if (!std::isnan(z_new)) {
+        z[i] = z_new;
+      } else {
+        // unable to simulate a new Z - we're likely so far in the tail of a distribution
+        // that it's incredibly hard to obtain a valid value; as such, we use an epsilon
+        // amount above or below 0
+        z[i] = sign * DBL_EPSILON;
       }
       #else
       double prob;
@@ -2112,13 +2236,13 @@ namespace {
         double* trainingSamples = results.trainingSamples + (simNum + chainStride) * data.numObservations;
         std::memcpy(trainingSamples, trainingSample, data.numObservations * sizeof(double));
         
-        if (data.offset != NULL) misc_addVectorsInPlace(data.offset, data.numObservations, 1.0, trainingSamples);
+        if (data.offset != NULL) misc_addVectorsInPlace(data.offset, data.numObservations, trainingSamples);
       }
       
       if (data.numTestObservations > 0) {
         double* testSamples = results.testSamples + (simNum + chainStride) * data.numTestObservations;
         std::memcpy(testSamples, testSample, data.numTestObservations * sizeof(double));
-        if (data.testOffset != NULL) misc_addVectorsInPlace(data.testOffset, data.numTestObservations, 1.0, testSamples);
+        if (data.testOffset != NULL) misc_addVectorsInPlace(data.testOffset, data.numTestObservations, testSamples);
       }
       
       results.sigmaSamples[simNum + chainStride] = 1.0;
@@ -2127,15 +2251,15 @@ namespace {
         double* trainingSamples = results.trainingSamples + (simNum + chainStride) * data.numObservations;
         // set training to dataScale.range * (totalFits + 0.5) + dataScale.min + offset
         misc_setVectorToConstant(trainingSamples, data.numObservations, sharedScratch.dataScale.range * 0.5 + sharedScratch.dataScale.min);
-        misc_addVectorsInPlace(trainingSample, data.numObservations, sharedScratch.dataScale.range, trainingSamples);
-        if (data.offset != NULL) misc_addVectorsInPlace(data.offset, data.numObservations, 1.0, trainingSamples);
+        misc_addVectorsInPlaceWithMultiplier(trainingSample, data.numObservations, sharedScratch.dataScale.range, trainingSamples);
+        if (data.offset != NULL) misc_addVectorsInPlace(data.offset, data.numObservations, trainingSamples);
       }
       
       if (data.numTestObservations > 0) {
         double* testSamples = results.testSamples + (simNum + chainStride) * data.numTestObservations;
         misc_setVectorToConstant(testSamples, data.numTestObservations, sharedScratch.dataScale.range * 0.5 + sharedScratch.dataScale.min);
-        misc_addVectorsInPlace(testSample, data.numTestObservations, sharedScratch.dataScale.range, testSamples);
-        if (data.testOffset != NULL) misc_addVectorsInPlace(data.testOffset, data.numTestObservations, 1.0, testSamples);
+        misc_addVectorsInPlaceWithMultiplier(testSample, data.numTestObservations, sharedScratch.dataScale.range, testSamples);
+        if (data.testOffset != NULL) misc_addVectorsInPlace(data.testOffset, data.numTestObservations, testSamples);
       }
        
       results.sigmaSamples[simNum + chainStride] = sigma * sharedScratch.dataScale.range;

@@ -91,12 +91,16 @@ namespace dbarts {
     std::size_t getNumSwappableNodes() const;
     
     NodeVector getBottomVector() const;
+    void fillBottomVector(NodeVector& nodeVector) const;
     NodeVector getNoGrandVector() const;
     NodeVector getNotBottomVector() const;
+    void fillNotBottomVector(NodeVector& nodeVector) const;
     NodeVector getSwappableVector() const;
+    void fillSwappableVector(NodeVector& nodeVector) const;
     
     void enumerateBottomNodes();
     NodeVector getAndEnumerateBottomVector(); // the nodes will have their enumeration indices set to their array index
+    void fillAndEnumerateBottomVector(NodeVector& bottomNodes);
     
     Node* findBottomNode(const BARTFit& fit, const xint_t* x) const;
         

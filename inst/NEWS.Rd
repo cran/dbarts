@@ -1,6 +1,36 @@
 \name{NEWS}
 \title{dbarts News}
 \encoding{UTF-8}
+\section{CHANGES IN VERSION 0.9-23}{
+  \subsection{NEW FEATURES}{
+    \itemize{
+      \item No longer depends on gfortran.
+      \item Uses SIMD instructions on M1 Macs.
+      \item Added experimental \code{callback} functionality to
+            \code{rbart_vi}.
+    }
+  }
+  \subsection{USER-VISIBLE CHANGES}{
+    \itemize{
+      \item Custom loss functiosn for \code{xbart} now require an additional
+            weights argument.
+    }
+  }
+  \subsection{BUG FIXES}{
+    \itemize{
+      \item Fixed a multithreaded issue leading to inconsistent results
+            with \code{xbart}.
+      \item \code{rbart_vi} should now correctly use default arguments.
+      \item \code{rbart_vi} now works with \code{keepTrainingFits} as false.
+      \item Weighted binary responses sample latent variables from the
+            correct distribution.
+      \item Extracting the values from the posterior predictive distribution
+            for models with weights now incorporates them into the variance.
+      \item Weighted values are considered in loss functions for
+            crossvalidation.
+    }
+  }
+}
 \section{CHANGES IN VERSION 0.9-21}{
   \subsection{NEW FEATURES}{
     \itemize{

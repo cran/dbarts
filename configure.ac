@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.64)
-AC_INIT([dbarts],[0.9.22],[vdorie@gmail.com])
+AC_INIT([dbarts],[0.9.23],[vdorie@gmail.com])
 AC_CONFIG_SRCDIR([src/R_interface.cpp])
 AC_CONFIG_AUX_DIR([tools/build-aux])
 AC_CONFIG_HEADERS([src/config.hpp])
@@ -183,7 +183,6 @@ AX_CXX_SNPRINTF_IN_NAMESPACE_STD
 AC_CHECK_FUNCS([log1p])
 AX_CXX_LOG1P_IN_NAMESPACE_STD
 AC_LANG_POP
-
 
 AC_CONFIG_FILES([src/Makevars])
 AC_OUTPUT

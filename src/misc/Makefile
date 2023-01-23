@@ -20,6 +20,9 @@ have.avx = $(BOOL,$(have.avx.test,$(AVX_FLAG)))
 have.avx2.test, = false
 have.avx2 = $(BOOL,$(have.avx2.test,$(AVX2_FLAG)))
 
+have.neon.test, = false
+have.neon = $(BOOL,$(have.neon.test,$(NEON_FLAG)))
+
 INCLUDE_DIR=../include
 
 PKG_CPPFLAGS=-I$(INCLUDE_DIR) $(PTHREAD_CPPFLAGS)
@@ -38,8 +41,13 @@ simd.source.avx = $(simd.source.sse4.1) $(simd.source.avx.$(have.avx))
 
 simd.source.avx2.true = partition_avx2.c
 simd.source.avx2.false = 
+simd.source.avx2 = $(simd.source.avx) $(simd.source.avx2.$(have.avx2))
 
-simd.sources = $(simd.source.avx) $(simd.source.avx2.$(have.avx2))
+simd.source.neon.true = linearAlgebra_neon.c partition_neon.c
+simd.source.neon.false = 
+simd.source.neon = $(simd.source.neon.$(have.neon))
+
+simd.sources = $(simd.source.avx2) $(simd.source.neon)
 simd.objects = $(simd.sources:.c=.o)
 
 LOCAL_SOURCES=adaptiveRadixTree.c binaryIO.c blockingThreadManager.c hierarchicalThreadManager.c linearAlgebra.c moments.c partition.c simd.c string.c thread.c $(simd.sources)
@@ -100,6 +108,14 @@ linearAlgebra_avx.o : linearAlgebra_avx.c $(INCLUDE_DIR)/misc/linearAlgebra.h
 	echo $(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) -c linearAlgebra_avx.c -o linearAlgebra_avx.c
 	@$(compile.linearAlgebra_avx)
 
+linearAlgebra_neon.true = $(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) -c linearAlgebra_neon.c -o linearAlgebra_neon.o
+linearAlgebra_neon.false = touch linearAlgebra_neon.o
+compile.linearAlgebra_neon = $(linearAlgebra_neon.$(have.neon))
+
+linearAlgebra_neon.o : linearAlgebra_neon.c $(INCLUDE_DIR)/misc/linearAlgebra.h
+	echo $(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) -c linearAlgebra_neon.c -o linearAlgebra_neon.c
+	@$(compile.linearAlgebra_neon)
+
 moments.o : moments.c $(INCLUDE_DIR)/misc/stats.h $(INCLUDE_DIR)/misc/simd.h
 	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) -c moments.c -o moments.o
 
@@ -137,6 +153,14 @@ compile.partition_avx2 = $(partition_avx2.$(have.avx2))
 partition_avx2.o : partition_avx2.c $(INCLUDE_DIR)/misc/partition.h partition_body.c
 	echo $(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) -c partition_avx2.c -o partition_avx2.o
 	@$(compile.partition_avx2)
+
+partition_neon.true = $(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) -c partition_neon.c -o partition_neon.o
+partition_neon.false = touch partition_neon.o
+compile.partition_neon = $(partition_neon.$(have.neon))
+
+partition_neon.o : partition_neon.c $(INCLUDE_DIR)/misc/partition.h partition_body.c
+	echo $(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) -c partition_neon.c -o partition_neon.o
+	@$(compile.partition_neon)
 
 simd.o : simd.c $(INCLUDE_DIR)/misc/simd.h
 	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) -c simd.c -o simd.o

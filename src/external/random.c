@@ -25,7 +25,7 @@
 
 #include <external/random.h>
 
-#include <math.h> // exp, log, expm1, fabs
+#include <math.h> // exp, log, expm1, fabs, nan
 #include <stdbool.h>
 
 #if (defined(__clang__) && (__clang_major__ > 3 || (__clang_major__ == 3 && __clang_minor__ >= 7))) || \
@@ -334,12 +334,16 @@ uint64_t ext_rng_simulateUnsignedIntegerUniformInRange(ext_rng* generator, uint6
   return actualMin + (uint64_t) (u * range);
 }
 
+#define MAX_ITER 1000
+// X ~ N(0, 1) | X >= lb
 double ext_rng_simulateLowerTruncatedStandardNormal(ext_rng* generator, double lowerBound)
 {
   double x;
+  int iter = 0;
   if (lowerBound < 0.0) {
     x = ext_rng_simulateStandardNormal(generator);
-    while (x < lowerBound) x = ext_rng_simulateStandardNormal(generator);
+    while (x < lowerBound && iter++ < MAX_ITER) x = ext_rng_simulateStandardNormal(generator);
+    if (iter == MAX_ITER && x >= lowerBound) return nan("");
   } else {
     double a = 0.5 * (lowerBound + sqrt(lowerBound * lowerBound + 4.0));
     double u, r;
@@ -349,15 +353,26 @@ double ext_rng_simulateLowerTruncatedStandardNormal(ext_rng* generator, double l
       u = ext_rng_simulateContinuousUniform(generator);
       double diff = x - a;
       r = exp(-0.5 * diff * diff);
-    } while (u > r);
+    } while (u > r && iter++ < MAX_ITER);
+    if (iter == MAX_ITER && u <= r) return nan("");
   }
   return x;
 }
 
+// X ~ mu + N(0, 1) | X >= lb - mean
+// X ~ N(mu, 1) | X >= lb
 double ext_rng_simulateLowerTruncatedNormalScale1(ext_rng* generator, double mean, double bound) {
   return mean + ext_rng_simulateLowerTruncatedStandardNormal(generator, bound - mean);
+}
+
+double ext_rng_simulateLowerTruncatedNormal(ext_rng* generator, double mean, double sd, double bound) {
+  return mean + sd * ext_rng_simulateLowerTruncatedStandardNormal(generator, (bound - mean) / sd);
 }
 
 double ext_rng_simulateUpperTruncatedNormalScale1(ext_rng* generator, double mean, double bound) {
   return mean - ext_rng_simulateLowerTruncatedStandardNormal(generator, mean - bound);
 }
+double ext_rng_simulateUpperTruncatedNormal(ext_rng* generator, double mean, double sd, double bound) {
+  return mean - sd * ext_rng_simulateLowerTruncatedStandardNormal(generator, (mean - bound) / sd);
+}
+

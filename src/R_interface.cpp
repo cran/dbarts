@@ -379,7 +379,7 @@ extern "C" {
     // below: testing
     DEF_FUNC("dbarts_setSIMDInstructionSet", setSIMDInstructionSet, 1),
     DEF_FUNC("dbarts_getMaxSIMDInstructionSet", getMaxSIMDInstructionSet, 0),
-
+    
     DEF_FUNC("rbart_fitted", rbart_getFitted, 4),
     { NULL, NULL, 0 }
   };

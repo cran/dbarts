@@ -43,9 +43,12 @@ namespace dbarts {
     std::size_t getNumSwappableNodes() const;
     
     NodeVector getBottomNodes() const;
+    void fillBottomNodesVector(NodeVector& nodeVector) const;
     NodeVector getNotBottomNodes() const;
+    void fillNotBottomNodesVector(NodeVector& nodeVector) const;
     NodeVector getNodesWhoseChildrenAreAtBottom() const;
     NodeVector getSwappableNodes() const;
+    void fillSwappableNodesVector(NodeVector& nodeVector) const;
     
     void setNodeAverages(const BARTFit& fit, std::size_t chainNum, const double* y);
     
@@ -98,9 +101,12 @@ namespace dbarts {
   inline std::size_t Tree::getNumSwappableNodes() const { return top.getNumSwappableNodes(); }
   
   inline NodeVector Tree::getBottomNodes() const { return top.getBottomVector(); }
+  inline void Tree::fillBottomNodesVector(NodeVector& nodeVector) const { return top.fillBottomVector(nodeVector); }
   inline NodeVector Tree::getNotBottomNodes() const { return top.getNotBottomVector(); }
+  inline void Tree::fillNotBottomNodesVector(NodeVector& nodeVector) const { return top.fillNotBottomVector(nodeVector); }
   inline NodeVector Tree::getNodesWhoseChildrenAreAtBottom() const { return top.getNoGrandVector(); }
   inline NodeVector Tree::getSwappableNodes() const { return top.getSwappableVector(); }
+  inline void Tree::fillSwappableNodesVector(NodeVector& nodeVector) const { return top.fillSwappableVector(nodeVector); }
 }
 
 #endif

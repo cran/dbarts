@@ -1,4 +1,4 @@
-4052233773d04f1fcec04b0833aa57fa *DESCRIPTION
+f31cc21d96f6f80c5218569629655c00 *DESCRIPTION
 a6f8f9f09f9339d203a9bff8b098e154 *NAMESPACE
 891c5e713d427aaceecdbe16cb9c2d0f *R/A_class.R
 40fc28ed38df9d268a93447be0ca9376 *R/bart.R
@@ -32,10 +32,10 @@ f208c919986b96bc80510b61801db2c7 *inst/CITATION
 ac32a73fdc83b3b67c176a0806d7f0e1 *inst/common/probitData.R
 8e19397b6102a35e9b67747899d6c58a *inst/doc/gibbs_sampler_mixture_model.R
 705a6ef022f1756233f27d14ce2b1bbc *inst/doc/gibbs_sampler_mixture_model.Rmd
-a28f66f78d799300d699b9ee5b23c79e *inst/doc/gibbs_sampler_mixture_model.pdf
+6dcea25aa75c6aff074587de348e8986 *inst/doc/gibbs_sampler_mixture_model.pdf
 63695bc2b3c9f5b65f176df44dcbbeb0 *inst/doc/working_with_saved_trees.R
 1d72d0e323557b552cf39d174c856609 *inst/doc/working_with_saved_trees.Rmd
-3e10a363b31dad801b68fb410ba2a780 *inst/doc/working_with_saved_trees.pdf
+ead2ffcf8d0411bfca1f44209f404ceb *inst/doc/working_with_saved_trees.pdf
 f80bbd9990523c58169b49bd73dd1a8d *inst/include/dbarts/R_C_interface.hpp
 555dd7a01a7b23319376a1039af217c2 *inst/include/dbarts/bartFit.hpp
 ffcbd7b43be4d93a6768ab21a11b11f5 *inst/include/dbarts/control.hpp
@@ -58,8 +58,8 @@ dd74bbd771380141b72bcba969577058 *inst/include/dbarts/data.hpp
 e0814f39a7c43a896b8aba9e08062bad *man/pdbart.Rd
 612d614fe5d40e074cc72debcdee0b97 *man/rbart.Rd
 b7fdcd710d95fd03cb313d57dd868fc9 *man/xbart.Rd
-732de7c53cabc9d2b09f23ee8c4c5de8 *src/Makevars.in
-fc505b268336386a22a4e6628581570d *src/Makevars.win
+96e0e58b3a6d2da9507afd44170ba9ee *src/Makevars.in
+1b6e971adfb6b49b059a0fdfb2acbf02 *src/Makevars.win
 49ad839fe7ac686b152476fe21303baf *src/R_C_interface.cpp
 f857b60a1d8b42a8afe2a31618095f0d *src/R_interface.cpp
 3a7648cf45455a0acca3fe0ef9624f5f *src/R_interface.hpp

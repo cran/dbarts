@@ -21,16 +21,20 @@
 \alias{\S4method{setTestOffset}{dbartsSampler}}
 \alias{\S4method{printTrees}{dbartsSampler}}
 \alias{\S4method{plotTree}{dbartsSampler}}
+\alias{\S4method{startThreads}{dbartsSampler}}
+\alias{\S4method{stopThreads}{dbartsSampler}}
 \description{
   A reference class object that contains a Bayesian Additive Regression Trees sampler in such a way that it can be modified, stopped, and started all while maintaining its own state.
 }
 \usage{
-\S4method{run}{dbartsSampler}(numBurnIn, numSamples, updateState = NA)
+\S4method{run}{dbartsSampler}(
+  numBurnIn, numSamples, updateState = NA, n.threads = control@n.threads
+)
 \S4method{sampleTreesFromPrior}{dbartsSampler}(updateState = NA)
 \S4method{sampleNodeParametersFromPrior}{dbartsSampler}(updateState = NA)
 \S4method{copy}{dbartsSampler}(shallow = FALSE)
 \S4method{show}{dbartsSampler}()
-\S4method{predict}{dbartsSampler}(x.test, offset.test)
+\S4method{predict}{dbartsSampler}(x.test, offset.test, n.threads = control@n.threads)
 \S4method{setControl}{dbartsSampler}(control)
 \S4method{setModel}{dbartsSampler}(model)
 \S4method{setData}{dbartsSampler}(data)
@@ -43,9 +47,12 @@
 \S4method{setTestOffset}{dbartsSampler}(offset.test, updateState = NA)
 \S4method{printTrees}{dbartsSampler}(treeNums)
 \S4method{plotTree}{dbartsSampler}(
-    treeNum, treePlotPars = c(
-        nodeHeight = 12, nodeWidth = 40, nodeGap = 8),
-    ...)
+  treeNum, treePlotPars = c(
+    nodeHeight = 12, nodeWidth = 40, nodeGap = 8),
+  ...
+)
+\S4method{startThreads}{dbartsSampler}(n.threads = control@n.threads)
+\S4method{stopThreads}{dbartsSampler}()
 }
 \arguments{
   \item{numBurnIn}{
@@ -86,6 +93,9 @@
   }
   \item{offset.test}{
     A numeric vector of length equal to that of the test matrix, or \code{NULL}. Can be missing for \code{setTestPredictors}.
+  }
+  \item{n.threads}{
+    If greater than one, chain predictions will take place in parallel.
   }
   \item{sigma}{
     Numeric vector of residual standard deviations, one for each chain.

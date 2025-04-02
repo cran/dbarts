@@ -67,7 +67,7 @@ rbart_vi <- function(
 
   if (!is.null(matchedCall[["k"]])) {
     node.prior <- quote(normal(k))
-    node.prior[[2L]] <- matchedCall[["k"]]
+    node.prior[[2L]] <- k
   } else {
     node.prior <- NULL
   }
@@ -154,7 +154,6 @@ rbart_vi <- function(
   samplerArgs <- namedList(formula = data, control, tree.prior, node.prior, resid.prior,
                            sigma = as.numeric(sigest))
   if (is.null(node.prior)) samplerArgs[["node.prior"]] <- NULL
-
   chainResults <- vector("list", n.chains)
   runSingleThreaded <- n.threads <= 1L || n.chains <= 1L
   if (!runSingleThreaded) {
@@ -356,6 +355,8 @@ rbart_vi_fit <- function(chain.num, seed, samplerArgs, rbartArgs)
     evalEnv = evalEnv
   )
 
+  sampler$startThreads()
+
   if (control@n.burn > 0L) {
     oldKeepTrees <- control@keepTrees
     control@keepTrees <- FALSE
@@ -388,6 +389,8 @@ rbart_vi_fit <- function(chain.num, seed, samplerArgs, rbartArgs)
   
   run_result <- rbart_vi_run(sampler, data, state, prior, verbose, control@n.samples, FALSE, rbartArgs)
   # state <- run_result$state
+  
+  sampler$stopThreads()
   
   tau <- run_result$samples$tau
   sigma <- run_result$samples$sigma
@@ -429,8 +432,11 @@ packageRbartResults <- function(control, data, group.by, group.by.test, chainRes
       n.samples <- dim(chainResults[[1L]]$ranef)[2L]
       n.unmeasured <- sum(unmeasuredLevels)
       totalRanef <- sapply(seq_along(chainResults), function(k) {
-        unmeasuredRanef <- matrix(rnorm(n.unmeasured * n.samples, 0, rep(chainResults[[k]]$tau, rep_len(n.samples, n.unmeasured))),
-                                  n.unmeasured, n.samples, dimnames = list(levels(group.by.test)[unmeasuredLevels], NULL))
+        unmeasuredRanef <- matrix(
+          rnorm(n.unmeasured * n.samples, 0, rep(chainResults[[k]]$tau, each = n.unmeasured)),
+          n.unmeasured, n.samples,
+          dimnames = list(levels(group.by.test)[unmeasuredLevels], NULL)
+        )
         rbind(chainResults[[k]]$ranef, unmeasuredRanef)
       })
       ranefDim <- c(dim(chainResults[[1L]]$ranef)[1L] + n.unmeasured, n.samples, n.chains)

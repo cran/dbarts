@@ -94,16 +94,19 @@ extern "C" {
     return result;
   }
   
-  SEXP run(SEXP fitExpr, SEXP numBurnInExpr, SEXP numSamplesExpr)
+  SEXP run(SEXP fitExpr, SEXP numBurnInExpr, SEXP numThreadsExpr, SEXP numSamplesExpr)
   {
     BARTFit* fit = static_cast<BARTFit*>(R_ExternalPtrAddr(fitExpr));
     if (fit == NULL) Rf_error("dbarts_run called on NULL external pointer");
     
     int i_temp;
-    size_t numBurnIn, numSamples;
+    size_t numBurnIn, numThreads, numSamples;
     
     i_temp = rc_getInt(numBurnInExpr, "number of burn-in steps", RC_LENGTH | RC_GEQ, rc_asRLength(1), RC_VALUE | RC_GEQ, 0, RC_NA | RC_YES, RC_END);
     numBurnIn = i_temp == NA_INTEGER ? fit->control.defaultNumBurnIn : static_cast<size_t>(i_temp);
+
+    i_temp = rc_getInt(numThreadsExpr, "number of threads", RC_LENGTH | RC_GEQ, rc_asRLength(1), RC_VALUE | RC_GEQ, 1, RC_NA | RC_YES, RC_END);
+    numThreads = i_temp == NA_INTEGER ? fit->control.numThreads : static_cast<size_t>(i_temp);
     
     i_temp = rc_getInt(numSamplesExpr, "number of samples", RC_LENGTH | RC_GEQ, rc_asRLength(1), RC_VALUE | RC_GEQ, 0, RC_NA | RC_YES, RC_END);    
     numSamples = i_temp == NA_INTEGER ? fit->control.defaultNumSamples : static_cast<size_t>(i_temp);
@@ -126,7 +129,7 @@ extern "C" {
     
     GetRNGstate();
     
-    Results* bartResults = fit->runSampler(numBurnIn, numSamples);
+    Results* bartResults = fit->runSampler(numBurnIn, numThreads, numSamples);
     
     PutRNGstate();
     
@@ -309,7 +312,7 @@ extern "C" {
     return R_NilValue;
   }
   
-  SEXP predict(SEXP fitExpr, SEXP x_testExpr, SEXP offset_testExpr)
+  SEXP predict(SEXP fitExpr, SEXP x_testExpr, SEXP offset_testExpr, SEXP numThreadsExpr)
   {
     const BARTFit* fit = static_cast<const BARTFit*>(R_ExternalPtrAddr(fitExpr));
     if (fit == NULL) Rf_error("dbarts_predict called on NULL external pointer");
@@ -340,6 +343,16 @@ extern "C" {
       }
     }
     
+    size_t numThreads = static_cast<size_t>(
+      rc_getInt(
+        numThreadsExpr, "number of threads",
+        RC_LENGTH | RC_EQ, rc_asRLength(1),
+        RC_VALUE | RC_GEQ, 1,
+        RC_NA | RC_NO,
+        RC_END
+      )
+    );
+
     SEXP result = PROTECT(Rf_allocVector(REALSXP, numTestObservations * numSamples * control.numChains));
     if (control.keepTrees) {
       if (fit->control.numChains <= 1)
@@ -351,7 +364,7 @@ extern "C" {
         rc_setDims(result, static_cast<int>(numTestObservations), static_cast<int>(control.numChains), -1);
     }
     
-    fit->predict(REAL(x_testExpr), numTestObservations, testOffset, REAL(result));
+    fit->predict(REAL(x_testExpr), numTestObservations, testOffset, numThreads, REAL(result));
     
     UNPROTECT(1);
     
@@ -436,7 +449,7 @@ extern "C" {
     bool forceUpdate     = rc_getBool(forceUpdateExpr,         "forceUpdate", RC_NA | RC_NO, RC_END);
     bool updateCutPoints = rc_getBool(updateCutPointsExpr, "updateCutPoints", RC_NA | RC_NO, RC_END);
     
-    rc_assertDimConstraints(xExpr, "dimensions of x", RC_LENGTH | RC_EQ, rc_asRLength(2),
+    rc_assertDimConstraints(xExpr, "dimension of x", RC_LENGTH | RC_EQ, rc_asRLength(2),
                             RC_VALUE | RC_EQ, static_cast<int>(fit->data.numObservations),
                             RC_VALUE | RC_EQ, static_cast<int>(fit->data.numPredictors),
                             RC_END);
@@ -458,7 +471,7 @@ extern "C" {
     
     bool result;
     if (Rf_isNull(colsExpr)) {
-      rc_assertDimConstraints(xExpr, "dimensions of x", RC_LENGTH | RC_EQ, rc_asRLength(2),
+      rc_assertDimConstraints(xExpr, "dimension of x", RC_LENGTH | RC_EQ, rc_asRLength(2),
                               RC_VALUE | RC_EQ, static_cast<int>(fit->data.numObservations),
                               RC_VALUE | RC_EQ, static_cast<int>(fit->data.numPredictors),
                               RC_END);
@@ -494,7 +507,7 @@ extern "C" {
         cols[i] = static_cast<size_t>(colsInt[i] - 1);
         if (cols[i] >= fit->data.numPredictors) {
           misc_stackFree(cols);
-          Rf_error("column '%d' is out of range", colsInt[i] + 1);
+          Rf_error("column '%d' is out of range", colsInt[i]);
         }
       }
       
@@ -697,6 +710,27 @@ extern "C" {
     }
     
     return resultExpr;
+  }
+
+  SEXP startThreads(SEXP fitExpr, SEXP numThreadsExpr)
+  {
+    BARTFit* fit = static_cast<BARTFit*>(R_ExternalPtrAddr(fitExpr));
+    if (fit == NULL) Rf_error("dbarts_startThreads called on NULL external pointer");
+
+    int i_temp = rc_getInt(numThreadsExpr, "number of threads", RC_LENGTH | RC_GEQ, rc_asRLength(1), RC_VALUE | RC_GEQ, 1, RC_NA | RC_YES, RC_END);
+    size_t numThreads = i_temp == NA_INTEGER ? fit->control.numThreads : static_cast<size_t>(i_temp);
+
+    return Rf_ScalarInteger(static_cast<int>(fit->startThreads(numThreads)));
+  }
+
+  SEXP stopThreads(SEXP fitExpr)
+  {
+    BARTFit* fit = static_cast<BARTFit*>(R_ExternalPtrAddr(fitExpr));
+    if (fit == NULL) Rf_error("dbarts_stopThreads called on NULL external pointer");
+
+    fit->stopThreads();
+
+    return R_NilValue;
   }
   
   SEXP createState(SEXP fitExpr)

@@ -1,6 +1,37 @@
 \name{NEWS}
 \title{dbarts News}
 \encoding{UTF-8}
+\section{CHANGES IN VERSION 0.9-31}{
+  \subsection{NEW FEATURES}{
+    \itemize{
+      \item `predict` now accepts a `n.threads` argument and will use native
+            threads to parallelize across chains.
+    }
+  }
+  \subsection{USER-VISIBLE CHANGES}{
+    \itemize{
+      \item When running with multiple threads, threads no longer persist after
+            `run`ing or `predict`ing and will be re-created on the next call.
+            Prior to this, threads were initialized at object creation and
+            would run in the background for the life-cycle of the sampler
+            object, waiting for work. To prevent frequent stopping/starting of
+            threads, new sampler-object functions `startThreads()` and
+            `stopThreads()` have been added that can bookend sampling or
+            prediction loops. 
+    }
+  }
+  \subsection{BUG FIXES}{
+    \itemize{
+      \item `rbart_vi` no longer fails when there are multiple out-of-sample
+            grouping factors in test data. Bug report thanks to github user
+            drcthal.
+      \item Should now correctly install on non-Mac OS arm64 systems. Bug
+            report thanks to Bob Dröge.
+      \item `rbart_vi` now works when `k` is a variable. Bug report thanks
+            to Bruno Tancredi.
+    }
+  }
+}
 \section{CHANGES IN VERSION 0.9-29}{
   \subsection{BUG FIXES}{
     \itemize{

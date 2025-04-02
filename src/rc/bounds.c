@@ -79,7 +79,7 @@ static inline int vgetInt(SEXP x, const char* name, va_list argsPointer)
   rc_constraintType constraintType;
   int arg;
   _rc_naAllowableType naOK = _RC_NO;
-  int defaultValue;
+  int defaultValue = R_NaInt;
   bool defaultSpecified = false;
   
   if (x == R_NilValue || (length = XLENGTH(x)) == 0 || !Rf_isInteger(x)) {
@@ -295,7 +295,7 @@ static inline double vgetDouble(SEXP x, const char* name, va_list argsPointer)
   rc_constraintType constraintType;
   int arg;
   _rc_naAllowableType naOK = _RC_NO;
-  double defaultValue;
+  double defaultValue = R_NaReal;
   bool defaultSpecified = false;
   
   if (x == R_NilValue || (length = XLENGTH(x)) == 0 || !Rf_isReal(x)) {
@@ -511,7 +511,7 @@ bool vgetBool(SEXP x, const char* name, va_list argsPointer)
   rc_constraintType constraintType;
   int arg;
   _rc_naAllowableType naOK = _RC_NO;
-  int defaultValue;
+  int defaultValue = NA_LOGICAL;
   bool defaultSpecified = false;
   
   if (x == R_NilValue || (length = XLENGTH(x)) == 0 || !Rf_isLogical(x)) {
@@ -799,50 +799,27 @@ static void assertLengthConstraint(const char* name, _rc_boundType boundType, R_
 {
   if (bound < 0) Rf_error("internal error: %s cannot have a negative length", name);
   
-  
-  if (length == 0) {
-    switch (boundType) {
-      case _RC_GT:
-      Rf_error("%s must be of length greater than %zu", name, bound);
-      break;
-      case _RC_GEQ:
-      if (bound > 0) Rf_error("%s must be of length greater than or equal to %zu", name, bound);
-      break;
-      case _RC_LT:
-      if (bound == 0) Rf_error("internal error: %s cannot be of length less than 0", name);
-      break;
-      case _RC_EQ:
-      if (bound != 0) Rf_error("%s must be of length equal to 0", name);
-      break;
-      case _RC_NE:
-      if (bound == 0) Rf_error("%s cannot be length equal to 0", name);
-      break;
-      default:
-      break;
-    }
-  } else {
-    switch (boundType) {
-      case _RC_GT:
-      if (length <= bound) Rf_error("%s must be of length greater than %zu", name, bound);
-      break;
-      case _RC_GEQ:
-      if (length < bound) Rf_error("%s must be of length greater than or equal to %zu", name, bound);
-      break;
-      case _RC_LT:
-      if (length >= bound) Rf_error("%s must be of length less than %zu", name, bound);
-      break;
-      case _RC_LEQ:
-      if (length > bound) Rf_error("%s must be of length less than or equal to %zu", name, bound);
-      break;
-      case _RC_EQ:
-      if (length != bound) Rf_error("%s must be of length equal to %zu", name, bound);
-      break;
-      case _RC_NE:
-      if (length == bound) Rf_error("%s cannot be of length equal to %zu", name, bound);
-      break;
-      default:
-      break;
-    }
+  switch (boundType) {
+    case _RC_GT:
+    if (length <= bound) Rf_error("%s must be of length greater than %zu", name, bound);
+    break;
+    case _RC_GEQ:
+    if (length < bound) Rf_error("%s must be of length greater than or equal to %zu", name, bound);
+    break;
+    case _RC_LT:
+    if (length >= bound) Rf_error("%s must be of length less than %zu", name, bound);
+    break;
+    case _RC_LEQ:
+    if (length > bound) Rf_error("%s must be of length less than or equal to %zu", name, bound);
+    break;
+    case _RC_EQ:
+    if (length != bound) Rf_error("%s must be of length equal to %zu", name, bound);
+    break;
+    case _RC_NE:
+    if (length == bound) Rf_error("%s cannot be of length equal to %zu", name, bound);
+    break;
+    default:
+    break;
   }
 }
 

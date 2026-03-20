@@ -1,6 +1,6 @@
 Package: dbarts
-Version: 0.9-32
-Date: 2025-04-02
+Version: 0.9-33
+Date: 2026-03-19
 Title: Discrete Bayesian Additive Regression Trees Sampler
 Authors@R: c(
   person("Vincent", "Dorie", role = c("aut", "cre"), email = "vdorie@gmail.com", comment = c(ORCID = "0000-0002-9576-3064")),
@@ -30,8 +30,9 @@ NeedsCompilation: yes
 Biarch: yes
 URL: https://github.com/vdorie/dbarts
 BugReports: https://github.com/vdorie/dbarts/issues
-Packaged: 2025-04-02 16:23:38 UTC; vdorie
-Author: Vincent Dorie [aut, cre] (<https://orcid.org/0000-0002-9576-3064>),
+Packaged: 2026-03-19 16:46:03 UTC; vdorie
+Author: Vincent Dorie [aut, cre] (ORCID:
+    <https://orcid.org/0000-0002-9576-3064>),
   Hugh Chipman [aut],
   Robert McCulloch [aut],
   Armon Dadgar [ctb] (adaptive radix tree),
@@ -43,14 +44,14 @@ Author: Vincent Dorie [aut, cre] (<https://orcid.org/0000-0002-9576-3064>),
     ax_gcc_x86_avx_xgetbv.m4, ax_gcc_x86_cpuid.m4),
   Rafael de Lucena Valle [ctb] (ax_compiler_ext.m4, ax_ext.m4),
   Steven G. Johnson [ctb] (ax_compiler_vendor.m4, ax_gcc_x86_cpuid.m4,
-    ax_pthread.m4, <https://orcid.org/0000-0001-7327-4967>),
+    ax_pthread.m4, ORCID: <https://orcid.org/0000-0001-7327-4967>),
   Matteo Frigo [ctb] (ax_compiler_vendor.m4, ax_gcc_x86_cpuid.m4),
   John Zaitseff [ctb] (ax_compiler_vendor.m4),
   Todd Veldhuizen [ctb] (ax_cxx_namespace_std.m4),
   Luc Maisonobe [ctb] (ax_cxx_namespace_std.m4),
-  Scott Pakin [ctb] (ax_func_posix_memalign.m4,
+  Scott Pakin [ctb] (ax_func_posix_memalign.m4, ORCID:
     <https://orcid.org/0000-0002-5220-1985>),
   Daniel Richard G. [ctb] (ax_pthread.m4)
 Maintainer: Vincent Dorie <vdorie@gmail.com>
 Repository: CRAN
-Date/Publication: 2025-04-02 18:50:02 UTC
+Date/Publication: 2026-03-20 06:10:46 UTC
